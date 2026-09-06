@@ -19,10 +19,6 @@ const DAYS: { key: string; label: string }[] = [
   { key: 'friday',    label: 'יום שישי'   },
 ]
 
-// Map from day key → Hebrew label (used in the quick-move menu)
-const DAY_LABEL: Record<string, string> = Object.fromEntries(
-  DAYS.map((d) => [d.key, d.label])
-)
 
 const CATEGORY_DOT: Record<TaskCategory, string> = {
   halacha_and_prep:      'bg-purple-400',

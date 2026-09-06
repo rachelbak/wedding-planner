@@ -103,11 +103,8 @@ export async function updateTask(
     await connectToDatabase()
 
     // Strip fields that must never change after creation
-    const {
-      id: _guardId,
-      createdAt: _guardCreatedAt,
-      ...mutableFields
-    } = updates
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _guardId, createdAt: _guardCreatedAt, ...mutableFields } = updates
 
     const doc = await TaskModel.findOneAndUpdate(
       { id },
