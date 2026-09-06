@@ -3,17 +3,9 @@ import type { Task } from '@/domain/types'
 
 // ---------------------------------------------------------------------------
 // Runtime enum arrays — single source of truth for Mongoose validation.
-// These mirror the union types in src/domain/types.ts exactly.
+// Category is no longer validated against a closed enum; tasks accept any slug
+// that corresponds to a document in the categories collection.
 // ---------------------------------------------------------------------------
-
-export const TASK_CATEGORIES = [
-  'halacha_and_prep',
-  'groom_gifts',
-  'trousseau_and_home',
-  'bride_clothing',
-  'logistics_and_vendors',
-  'sheva_brachot',
-] as const
 
 export const TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'DONE'] as const
 
@@ -64,8 +56,8 @@ const taskSchema = new Schema<ITaskDocument>(
     },
     category: {
       type: String,
-      enum: TASK_CATEGORIES,
       required: true,
+      trim: true,
     },
     subcategory: {
       type: String,

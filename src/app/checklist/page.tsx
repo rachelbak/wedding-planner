@@ -1,4 +1,5 @@
 import { getTasks } from '@/app/actions/tasks'
+import { getCategories } from '@/app/actions/categories'
 import AppShell from '@/components/ui/AppShell'
 import TaskChecklist from '@/components/features/checklist/TaskChecklist'
 
@@ -7,13 +8,21 @@ export default async function ChecklistPage({
 }: {
   searchParams: Promise<{ category?: string }>
 }) {
-  const result = await getTasks()
-  const tasks = result.success ? result.data : []
+  const [tasksResult, categoriesResult] = await Promise.all([
+    getTasks(),
+    getCategories(),
+  ])
+  const tasks      = tasksResult.success      ? tasksResult.data      : []
+  const categories = categoriesResult.success ? categoriesResult.data : []
   const { category } = await searchParams
 
   return (
     <AppShell>
-      <TaskChecklist initialTasks={tasks} initialCategory={category} />
+      <TaskChecklist
+        initialTasks={tasks}
+        initialCategories={categories}
+        initialCategory={category}
+      />
     </AppShell>
   )
 }

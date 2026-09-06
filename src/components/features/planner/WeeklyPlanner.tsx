@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { CheckCircle2, Circle, Loader2, MoreHorizontal, X } from 'lucide-react'
 import { updateTask } from '@/app/actions/tasks'
-import type { Task, TaskCategory, Priority, AssignedTo, TaskStatus } from '@/domain/types'
+import type { Task, Priority, AssignedTo, TaskStatus } from '@/domain/types'
 
 // ============================================================================
 // CONSTANTS
@@ -20,7 +20,8 @@ const DAYS: { key: string; label: string }[] = [
 ]
 
 
-const CATEGORY_DOT: Record<TaskCategory, string> = {
+// Color dot per built-in slug; custom categories fall back to slate
+const CATEGORY_DOT: Record<string, string> = {
   halacha_and_prep:      'bg-purple-400',
   groom_gifts:           'bg-pink-400',
   trousseau_and_home:    'bg-emerald-400',
@@ -29,7 +30,7 @@ const CATEGORY_DOT: Record<TaskCategory, string> = {
   sheva_brachot:         'bg-indigo-400',
 }
 
-const CATEGORY_LABEL: Record<TaskCategory, string> = {
+const CATEGORY_LABEL: Record<string, string> = {
   halacha_and_prep:      'הלכה והכנות',
   groom_gifts:           'מתנות לחתן',
   trousseau_and_home:    'נדוניה ובית',
@@ -105,8 +106,8 @@ function PlannerCard({
   const isDone     = task.status === 'DONE'
   const pBorder    = PRIORITY_BORDER[task.priority]
   const pText      = PRIORITY_TEXT[task.priority]
-  const dotCls     = CATEGORY_DOT[task.category]
-  const catLabel   = CATEGORY_LABEL[task.category]
+  const dotCls   = CATEGORY_DOT[task.category]   ?? 'bg-slate-400'
+  const catLabel = CATEGORY_LABEL[task.category] ?? task.category
 
   return (
     <div
@@ -316,7 +317,7 @@ export default function WeeklyPlanner({ initialTasks }: { initialTasks: Task[] }
 
   // Filters
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all')
-  const [categoryFilter, setCategoryFilter] = useState<TaskCategory | 'all'>('all')
+  const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
   const [showDone, setShowDone]             = useState(false)
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -514,11 +515,11 @@ export default function WeeklyPlanner({ initialTasks }: { initialTasks: Task[] }
         {/* Category select */}
         <select
           value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value as TaskCategory | 'all')}
+          onChange={(e) => setCategoryFilter(e.target.value)}
           className="text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 text-slate-600"
         >
           <option value="all">כל הקטגוריות</option>
-          {(Object.entries(CATEGORY_LABEL) as [TaskCategory, string][]).map(([key, label]) => (
+          {Object.entries(CATEGORY_LABEL).map(([key, label]) => (
             <option key={key} value={key}>{label}</option>
           ))}
         </select>
@@ -576,10 +577,10 @@ export default function WeeklyPlanner({ initialTasks }: { initialTasks: Task[] }
 
       {/* ── Legend ───────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 pt-4 border-t border-slate-100">
-        {(Object.entries(CATEGORY_DOT) as [TaskCategory, string][]).map(([cat, dotCls]) => (
+        {Object.entries(CATEGORY_DOT).map(([cat, dotCls]) => (
           <div key={cat} className="flex items-center gap-1.5">
             <div className={`w-2 h-2 rounded-full ${dotCls}`} />
-            <span className="text-xs text-slate-400">{CATEGORY_LABEL[cat]}</span>
+            <span className="text-xs text-slate-400">{CATEGORY_LABEL[cat] ?? cat}</span>
           </div>
         ))}
       </div>
