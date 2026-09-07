@@ -22,6 +22,7 @@ import {
   deleteCategory,
 } from '@/app/actions/categories'
 import type { Task, Category, Priority, AssignedTo, TaskStatus } from '@/domain/types'
+import EditTaskModal from './EditTaskModal'
 
 // ============================================================================
 // CONSTANTS
@@ -109,15 +110,17 @@ interface TaskItemProps {
   onToggle:   () => void
   onDelete:   () => void
   onExpand:   () => void
+  onEdit:     () => void
 }
 
-function TaskItem({ task, isExpanded, isPending, onToggle, onDelete, onExpand }: TaskItemProps) {
+function TaskItem({ task, isExpanded, isPending, onToggle, onDelete, onExpand, onEdit }: TaskItemProps) {
   const isDone = task.status === 'DONE'
   const pCfg   = PRIORITY_CONFIG[task.priority]
 
   return (
     <div
-      className={`group bg-white rounded-xl border transition-all duration-200 ${
+      onClick={onEdit}
+      className={`group bg-white rounded-xl border transition-all duration-200 cursor-pointer ${
         isDone
           ? 'border-slate-100 opacity-60'
           : 'border-slate-200 hover:border-violet-200 hover:shadow-sm'
@@ -125,9 +128,9 @@ function TaskItem({ task, isExpanded, isPending, onToggle, onDelete, onExpand }:
     >
       <div className="flex items-start gap-3 p-4">
 
-        {/* Checkbox */}
+        {/* Checkbox — stopPropagation so it doesn't open edit modal */}
         <button
-          onClick={onToggle}
+          onClick={(e) => { e.stopPropagation(); onToggle() }}
           disabled={isPending}
           aria-label={isDone ? 'סמן כלא הושלם' : 'סמן כהושלם'}
           className="mt-0.5 shrink-0 text-slate-300 hover:text-violet-500 transition-colors disabled:opacity-40"
@@ -160,7 +163,7 @@ function TaskItem({ task, isExpanded, isPending, onToggle, onDelete, onExpand }:
           {task.notes && (
             <>
               <button
-                onClick={onExpand}
+                onClick={(e) => { e.stopPropagation(); onExpand() }}
                 className="flex items-center gap-1 mt-1.5 text-xs text-slate-400 hover:text-violet-500 transition-colors"
               >
                 {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -190,7 +193,7 @@ function TaskItem({ task, isExpanded, isPending, onToggle, onDelete, onExpand }:
             {pCfg.label}
           </span>
           <button
-            onClick={onDelete}
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
             disabled={isPending}
             aria-label="מחק משימה"
             className="p-1 text-slate-300 hover:text-red-500 transition-colors disabled:opacity-30 md:opacity-0 md:group-hover:opacity-100"
@@ -662,6 +665,13 @@ export default function TaskChecklist({
     deletingId: null,
   })
 
+  // ── Edit task modal ───────────────────────────────────────────────────────
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+
+  function handleSaveEdit(updated: Task) {
+    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+  }
+
   // ── Toast ─────────────────────────────────────────────────────────────────
   const showToast = useCallback((message: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current)
@@ -905,6 +915,15 @@ export default function TaskChecklist({
         onDelete={handleDeleteCategory}
       />
 
+      {editingTask && (
+        <EditTaskModal
+          task={editingTask}
+          categories={categories}
+          onSave={handleSaveEdit}
+          onClose={() => setEditingTask(null)}
+        />
+      )}
+
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -1072,6 +1091,7 @@ export default function TaskChecklist({
                 onToggle={() => handleToggle(task)}
                 onDelete={() => handleDelete(task)}
                 onExpand={() => toggleExpand(task.id)}
+                onEdit={() => setEditingTask(task)}
               />
             ))}
           </div>

@@ -97,8 +97,12 @@ export async function createTask(
 
 export async function updateTask(
   id: string,
-  // Allow null for optional fields — null means "$unset" (clear) the field.
-  updates: Partial<Task> & { dueDate?: string | null },
+  // Allow null for optional fields — null triggers MongoDB $unset.
+  // Omit the nullable fields from Partial<Task> so the wider union wins.
+  updates: Omit<Partial<Task>, 'dueDate' | 'subcategory'> & {
+    dueDate?:     string | null
+    subcategory?: string | null
+  },
 ): Promise<ActionResult<Task>> {
   try {
     await connectToDatabase()
