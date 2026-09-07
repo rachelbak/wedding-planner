@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   CheckCircle2, Circle, Loader2, MoreHorizontal, X,
-  ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays,
+  ChevronLeft, ChevronRight, CalendarDays, Inbox, Mail,
 } from 'lucide-react'
 import { updateTask } from '@/app/actions/tasks'
 import type { Task, Category, Priority, AssignedTo, TaskStatus } from '@/domain/types'
@@ -14,6 +14,7 @@ import {
   buildCalendarMaps, type HolidayBadge,
 } from '@/utils/hebrewCalendar'
 import EditTaskModal from '@/components/features/checklist/EditTaskModal'
+import EmailModal from '@/components/ui/EmailModal'
 
 // ============================================================================
 // CONSTANTS
@@ -22,7 +23,6 @@ import EditTaskModal from '@/components/features/checklist/EditTaskModal'
 const DAY_LABELS = ['יום ראשון', 'יום שני', 'יום שלישי', 'יום רביעי', 'יום חמישי', 'יום שישי']
 const DAY_SHORT  = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי']
 
-// Stable dot palette — cycles for categories beyond index 9
 const DOT_PALETTE = [
   'bg-purple-400', 'bg-pink-400',   'bg-emerald-400', 'bg-rose-400',
   'bg-amber-400',  'bg-indigo-400', 'bg-sky-400',     'bg-teal-400',
@@ -138,19 +138,15 @@ function PlannerCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onEdit}
-      className={`relative bg-white rounded-xl border ${pBorder} shadow-sm select-none
-        cursor-pointer transition-all duration-150
-        ${isDragging ? 'opacity-40 scale-95 shadow-none' : 'opacity-100 hover:shadow-md hover:-translate-y-px'}`}
+      className={`relative bg-white rounded-xl border ${pBorder} shadow-sm select-none cursor-pointer transition-all duration-150 ${
+        isDragging ? 'opacity-40 scale-95 shadow-none' : 'opacity-100 hover:shadow-md hover:-translate-y-px'
+      }`}
     >
       <div className="flex items-start gap-2 p-3">
         <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotCls}`} />
 
         <div className="flex-1 min-w-0">
-          <p
-            className={`text-xs font-medium leading-snug break-words ${
-              isDone ? 'line-through text-slate-400' : 'text-slate-700'
-            }`}
-          >
+          <p className={`text-xs font-medium leading-snug break-words ${isDone ? 'line-through text-slate-400' : 'text-slate-700'}`}>
             {task.title}
           </p>
           <p className={`text-[10px] mt-0.5 ${pText}`}>
@@ -158,23 +154,22 @@ function PlannerCard({
           </p>
         </div>
 
-        {/* Checkbox — stopPropagation so card click doesn't open edit */}
+        {/* Checkbox */}
         <button
           onClick={(e) => { e.stopPropagation(); onToggle() }}
           disabled={isPending}
           aria-label={isDone ? 'בטל' : 'סמן כהושלם'}
           className="shrink-0 text-slate-300 hover:text-violet-500 transition-colors disabled:opacity-40"
         >
-          {isPending ? (
-            <Loader2 size={14} className="animate-spin text-violet-400" />
-          ) : isDone ? (
-            <CheckCircle2 size={14} className="text-violet-500" />
-          ) : (
-            <Circle size={14} />
-          )}
+          {isPending
+            ? <Loader2 size={14} className="animate-spin text-violet-400" />
+            : isDone
+              ? <CheckCircle2 size={14} className="text-violet-500" />
+              : <Circle size={14} />
+          }
         </button>
 
-        {/* Quick-move menu — stopPropagation */}
+        {/* Quick-move menu */}
         <div className="relative shrink-0">
           <button
             onMouseDown={(e) => { e.stopPropagation(); onMenuMouseDown(e) }}
@@ -202,6 +197,98 @@ function PlannerCard({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// BACKLOG SIDEBAR PANEL
+// — dedicated drop-zone for unassigned tasks; stays sticky while weeks scroll
+// ============================================================================
+
+interface BacklogSidebarProps {
+  tasks:        Task[]
+  categories:   Category[]
+  isDropTarget: boolean
+  draggedId:    string | null
+  pendingIds:   Set<string>
+  openMenuId:   string | null
+  moveOptions:  MoveOption[]
+  onDragOver:   (e: React.DragEvent) => void
+  onDragLeave:  (e: React.DragEvent) => void
+  onDrop:       (e: React.DragEvent) => void
+  onDragStart:  (e: React.DragEvent<HTMLDivElement>, id: string) => void
+  onDragEnd:    () => void
+  onToggle:     (task: Task) => void
+  onMove:       (taskId: string, targetKey: string) => void
+  onMenuToggle: (id: string) => void
+  onMenuMD:     (e: React.MouseEvent, id: string) => void
+  onEdit:       (task: Task) => void
+}
+
+function BacklogSidebar({
+  tasks, categories, isDropTarget,
+  draggedId, pendingIds, openMenuId, moveOptions,
+  onDragOver, onDragLeave, onDrop,
+  onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
+}: BacklogSidebarProps) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden lg:max-h-[calc(100vh-7rem)]">
+      {/* Fixed header */}
+      <div className="shrink-0 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+        <Inbox size={14} className="text-slate-400" />
+        <span className="text-sm font-bold text-slate-700">טרם שובץ</span>
+        {tasks.length > 0 && (
+          <span className="ms-auto text-xs font-semibold text-violet-600 bg-violet-100 rounded-full px-2 py-0.5 min-w-[24px] text-center">
+            {tasks.length}
+          </span>
+        )}
+      </div>
+
+      {/* Scrollable drop zone */}
+      <div
+        className={`flex-1 overflow-y-auto p-3 min-h-[100px] transition-colors duration-150 ${
+          isDropTarget ? 'bg-violet-50/50' : ''
+        }`}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        {tasks.length === 0 ? (
+          <div
+            className={`flex items-center justify-center min-h-[80px] rounded-xl border-2 border-dashed transition-colors ${
+              isDropTarget ? 'border-violet-400 bg-violet-50' : 'border-slate-200'
+            }`}
+          >
+            <p className="text-xs text-slate-400">גרור משימות לכאן</p>
+          </div>
+        ) : (
+          <div
+            className={`space-y-2 rounded-xl p-2 transition-colors ${
+              isDropTarget ? 'ring-2 ring-violet-400 ring-offset-1 bg-violet-50/40' : ''
+            }`}
+          >
+            {tasks.map((task) => (
+              <PlannerCard
+                key={task.id}
+                task={task}
+                dotCls={getCategoryDot(task.category, categories)}
+                isDragging={draggedId === task.id}
+                isPending={pendingIds.has(task.id)}
+                isMenuOpen={openMenuId === task.id}
+                moveOptions={moveOptions.filter((o) => o.key !== 'backlog')}
+                onDragStart={(e) => onDragStart(e, task.id)}
+                onDragEnd={onDragEnd}
+                onToggle={() => onToggle(task)}
+                onMove={(targetKey) => onMove(task.id, targetKey)}
+                onMenuMouseDown={(e) => onMenuMD(e, task.id)}
+                onMenuClick={() => onMenuToggle(task.id)}
+                onEdit={() => onEdit(task)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -258,12 +345,12 @@ function DayColumnHeader({
 }
 
 // ============================================================================
-// DAY COLUMN
+// DAY COLUMN  (Sun–Fri only; backlog lives in the sidebar)
 // ============================================================================
 
 interface DayColumnProps {
-  dateKey:      string
-  dayIndex?:    number
+  dateKey:      string           // YYYY-MM-DD
+  dayIndex:     number           // 0=Sun … 5=Fri
   tasks:        Task[]
   categories:   Category[]
   isDropTarget: boolean
@@ -292,14 +379,11 @@ function DayColumn({
   onDragOver, onDragLeave, onDrop,
   onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
 }: DayColumnProps) {
-  const isBacklog = dateKey === 'backlog'
-  const label      = isBacklog ? 'טרם שובץ'  : (DAY_LABELS[dayIndex!] ?? '')
-  const shortLabel = isBacklog ? 'בלוג'      : (DAY_SHORT[dayIndex!]  ?? '')
-  const today      = !isBacklog && isToday(parseLocalDate(dateKey))
+  const today = isToday(parseLocalDate(dateKey))
 
   return (
     <div
-      className={`flex flex-col min-w-[140px] sm:min-w-0 sm:flex-1 rounded-2xl border-2 transition-colors duration-150 p-3 ${
+      className={`flex flex-col min-w-[120px] flex-1 rounded-2xl border-2 transition-colors duration-150 p-3 ${
         isDropTarget
           ? 'border-violet-400 bg-violet-50/60'
           : 'border-transparent bg-slate-50/60'
@@ -309,8 +393,8 @@ function DayColumn({
       onDrop={onDrop}
     >
       <DayColumnHeader
-        label={label}
-        shortLabel={shortLabel}
+        label={DAY_LABELS[dayIndex] ?? ''}
+        shortLabel={DAY_SHORT[dayIndex] ?? ''}
         hebrewDate={hebrewDate}
         holiday={holiday}
         isToday={today}
@@ -318,7 +402,7 @@ function DayColumn({
         taskCount={tasks.length}
       />
 
-      <div className="flex-1 space-y-2 min-h-[60px]">
+      <div className="flex-1 space-y-2 min-h-[48px]">
         {tasks.map((task) => (
           <PlannerCard
             key={task.id}
@@ -343,7 +427,7 @@ function DayColumn({
 }
 
 // ============================================================================
-// WEEK GRID
+// WEEK GRID  (6 day columns, Sun–Fri; backlog is always in the sidebar)
 // ============================================================================
 
 interface WeekGridProps {
@@ -357,7 +441,6 @@ interface WeekGridProps {
   pendingIds:   Set<string>
   openMenuId:   string | null
   moveOptions:  MoveOption[]
-  showBacklog:  boolean
   onDragOver:   (e: React.DragEvent, key: string) => void
   onDragLeave:  (e: React.DragEvent) => void
   onDrop:       (e: React.DragEvent, key: string) => void
@@ -373,31 +456,16 @@ interface WeekGridProps {
 function WeekGrid({
   weekDates, tasksByKey, categories, hebrewDates, holidays,
   dragOverKey, draggedId, pendingIds, openMenuId, moveOptions,
-  showBacklog,
   onDragOver, onDragLeave, onDrop, onDragStart, onDragEnd,
   onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
 }: WeekGridProps) {
   const colProps = {
-    categories, hebrewDates, holidays, draggedId, pendingIds, openMenuId, moveOptions,
+    categories, draggedId, pendingIds, openMenuId, moveOptions,
     onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
   }
 
   return (
     <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-      {showBacklog && (
-        <DayColumn
-          dateKey="backlog"
-          tasks={tasksByKey.get('backlog') ?? []}
-          isDropTarget={dragOverKey === 'backlog'}
-          hebrewDate=""
-          holiday={undefined}
-          onDragOver={(e) => onDragOver(e, 'backlog')}
-          onDragLeave={onDragLeave}
-          onDrop={(e) => onDrop(e, 'backlog')}
-          {...colProps}
-        />
-      )}
-
       {weekDates.map((date, idx) => {
         const key = toDateStr(date)
         return (
@@ -434,13 +502,10 @@ export default function WeeklyPlanner({
   const weddingDate = useMemo(() => parseLocalDate(WEDDING_DATE), [])
 
   // ── Core state ────────────────────────────────────────────────────────────
-  const [tasks, setTasks]         = useState<Task[]>(initialTasks)
-  const [categories]              = useState<Category[]>(initialCategories)
-  const [viewMode, setViewMode]   = useState<ViewMode>('week')
+  const [tasks, setTasks]       = useState<Task[]>(initialTasks)
+  const [categories]            = useState<Category[]>(initialCategories)
+  const [viewMode, setViewMode] = useState<ViewMode>('week')
   const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStart(new Date()))
-  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(
-    () => new Set([toDateStr(getWeekStart(new Date()))]),
-  )
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
@@ -455,6 +520,7 @@ export default function WeeklyPlanner({
   const [pendingIds, setPendingIds]   = useState<Set<string>>(new Set())
   const [openMenuId, setOpenMenuId]   = useState<string | null>(null)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [emailOpen, setEmailOpen]     = useState(false)
   const [toast, setToast]             = useState<ToastState | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -465,10 +531,10 @@ export default function WeeklyPlanner({
     return buildCalendarMaps(from, to)
   }, [weddingDate])
 
-  // ── All weeks ─────────────────────────────────────────────────────────────
+  // ── All weeks list ────────────────────────────────────────────────────────
   const allWeeks = useMemo(() => getAllWeeks(new Date(), weddingDate), [weddingDate])
 
-  // ── Filtered tasks ────────────────────────────────────────────────────────
+  // ── Filtered + keyed tasks ────────────────────────────────────────────────
   const visibleTasks = useMemo(() =>
     tasks
       .filter((t) => showDone || t.status !== 'DONE')
@@ -495,7 +561,7 @@ export default function WeeklyPlanner({
   // ── Current week dates ────────────────────────────────────────────────────
   const currentWeekDates = useMemo(() => getWeekDates(currentWeekStart), [currentWeekStart])
 
-  // ── Move options ──────────────────────────────────────────────────────────
+  // ── Move options for quick-move menu ──────────────────────────────────────
   const moveOptions: MoveOption[] = useMemo(() => {
     const wd = viewMode === 'week' ? currentWeekDates : getWeekDates(getWeekStart(new Date()))
     return [
@@ -522,7 +588,7 @@ export default function WeeklyPlanner({
     toastTimer.current = setTimeout(() => setToast(null), 3500)
   }, [])
 
-  // ── Move task ─────────────────────────────────────────────────────────────
+  // ── Move task (DnD + quick-move menu) ─────────────────────────────────────
   async function moveTask(taskId: string, targetKey: string) {
     if (pendingIds.has(taskId)) return
     const task = tasks.find((t) => t.id === taskId)
@@ -572,7 +638,7 @@ export default function WeeklyPlanner({
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
   }
 
-  // ── DnD ───────────────────────────────────────────────────────────────────
+  // ── DnD handlers ──────────────────────────────────────────────────────────
   function handleDragStart(e: React.DragEvent<HTMLDivElement>, taskId: string) {
     e.dataTransfer.setData('taskId', taskId)
     setTimeout(() => setDraggedId(taskId), 0)
@@ -600,7 +666,7 @@ export default function WeeklyPlanner({
     setDragOverKey(null)
   }
 
-  // ── Menu ──────────────────────────────────────────────────────────────────
+  // ── Menu handlers ─────────────────────────────────────────────────────────
   function handleMenuToggle(id: string) {
     setOpenMenuId((prev) => (prev === id ? null : id))
   }
@@ -610,7 +676,7 @@ export default function WeeklyPlanner({
     setOpenMenuId((prev) => (prev === id ? null : id))
   }
 
-  // ── Shared props bundle for WeekGrid ──────────────────────────────────────
+  // ── Shared props bundle passed to WeekGrid ────────────────────────────────
   const sharedGridProps = {
     categories,
     hebrewDates,
@@ -623,6 +689,27 @@ export default function WeeklyPlanner({
     onDragOver:   handleDragOver,
     onDragLeave:  handleDragLeave,
     onDrop:       handleDrop,
+    onDragStart:  handleDragStart,
+    onDragEnd:    handleDragEnd,
+    onToggle:     handleToggle,
+    onMove:       moveTask,
+    onMenuToggle: handleMenuToggle,
+    onMenuMD:     handleMenuMouseDown,
+    onEdit:       (task: Task) => setEditingTask(task),
+  }
+
+  // ── Shared props for the BacklogSidebar ───────────────────────────────────
+  const backlogProps = {
+    tasks:        tasksByKey.get('backlog') ?? [],
+    categories,
+    isDropTarget: dragOverKey === 'backlog',
+    draggedId,
+    pendingIds,
+    openMenuId,
+    moveOptions,
+    onDragOver:   (e: React.DragEvent) => handleDragOver(e, 'backlog'),
+    onDragLeave:  handleDragLeave,
+    onDrop:       (e: React.DragEvent) => handleDrop(e, 'backlog'),
     onDragStart:  handleDragStart,
     onDragEnd:    handleDragEnd,
     onToggle:     handleToggle,
@@ -662,17 +749,37 @@ export default function WeeklyPlanner({
         />
       )}
 
+      {emailOpen && (
+        <EmailModal
+          taskIds={visibleTasks.map((t) => t.id)}
+          defaultEmail={process.env.NEXT_PUBLIC_BRIDE_EMAIL ?? ''}
+          onClose={() => setEmailOpen(false)}
+        />
+      )}
+
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
         <div className="flex-1">
           <h1 className="text-2xl md:text-3xl font-bold text-slate-800">לוח תכנון שבועי</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            גרור משימות לתאריכים · לחץ על כרטיסיה לעריכה
+            גרור משימות מהסרגל הימני לכל שבוע · לחץ על כרטיסיה לעריכה
           </p>
         </div>
 
+        {/* Right-side controls: email + view toggle */}
+        <div className="flex items-center gap-2 self-start">
+          <button
+            onClick={() => setEmailOpen(true)}
+            title="שלחי רשימה במייל"
+            aria-label="שליחה למייל"
+            className="flex items-center gap-2 px-3 py-2 bg-white text-slate-600 text-sm font-medium rounded-xl hover:bg-violet-50 hover:text-violet-700 border border-slate-200 transition-colors"
+          >
+            <Mail size={15} />
+            <span className="hidden sm:inline">מייל</span>
+          </button>
+
         {/* View mode toggle */}
-        <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 gap-1 self-start">
+        <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 gap-1">
           {(['week', 'all'] as ViewMode[]).map((mode) => (
             <button
               key={mode}
@@ -688,11 +795,12 @@ export default function WeeklyPlanner({
             </button>
           ))}
         </div>
-      </div>
+        </div>{/* /right-side controls */}
+      </div>{/* /page header */}
 
-      {/* ── Filters ───────────────────────────────────────────────────────── */}
+      {/* ── Filter bar ────────────────────────────────────────────────────── */}
       <div className="space-y-3 mb-6">
-        {/* Category filter row */}
+        {/* Category filter */}
         {categories.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
             <button
@@ -722,7 +830,7 @@ export default function WeeklyPlanner({
           </div>
         )}
 
-        {/* Assignee + show-done row */}
+        {/* Assignee + show-done */}
         <div className="flex flex-wrap items-center gap-3">
           {(['all', 'bride', 'groom', 'parents'] as AssigneeFilter[]).map((v) => {
             const labels: Record<AssigneeFilter, string> = {
@@ -760,166 +868,140 @@ export default function WeeklyPlanner({
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          VIEW: CURRENT WEEK
+          TWO-COLUMN LAYOUT
+          Mobile:  flex-col-reverse → weeks on top, sidebar below
+          Desktop: flex-row with RTL → sidebar on right, weeks on left
       ══════════════════════════════════════════════════════════════════════ */}
-      {viewMode === 'week' && (
-        <div>
-          {/* Week navigation */}
-          <div className="flex items-center gap-3 mb-4">
-            <button
-              onClick={() => setCurrentWeekStart((ws) => addWeeks(ws, -1))}
-              className="p-2 rounded-xl bg-white border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors"
-              aria-label="שבוע קודם"
-            >
-              <ChevronRight size={16} />
-            </button>
+      <div className="flex flex-col-reverse lg:flex-row gap-6 lg:items-start">
 
-            <div className="flex-1 text-center">
-              <p className="text-sm font-bold text-slate-800">
-                {getWeekLabel(currentWeekStart, weddingDate)}
-              </p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {weekRangeLabel(currentWeekStart)}
-              </p>
-            </div>
+        {/* ── Backlog Sidebar ─────────────────────────────────────────────── */}
+        {/* First in DOM = rightmost in RTL flex-row on desktop */}
+        <aside className="w-full lg:w-72 xl:w-80 shrink-0 lg:sticky lg:top-6">
+          <BacklogSidebar {...backlogProps} />
+        </aside>
 
-            <button
-              onClick={() => setCurrentWeekStart(getWeekStart(new Date()))}
-              className={`px-3 py-1.5 text-xs font-medium rounded-xl border transition-colors ${
-                weeksToWedding === 0
-                  ? 'border-violet-400 bg-violet-50 text-violet-700'
-                  : 'border-slate-200 bg-white text-slate-500 hover:border-violet-300'
-              }`}
-            >
-              השבוע
-            </button>
+        {/* ── Weeks Area ──────────────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0">
 
-            <button
-              onClick={() => setCurrentWeekStart((ws) => addWeeks(ws, 1))}
-              className="p-2 rounded-xl bg-white border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors"
-              aria-label="שבוע הבא"
-            >
-              <ChevronLeft size={16} />
-            </button>
-          </div>
-
-          <WeekGrid
-            weekDates={currentWeekDates}
-            tasksByKey={tasksByKey}
-            showBacklog={true}
-            {...sharedGridProps}
-          />
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          VIEW: ALL WEEKS
-      ══════════════════════════════════════════════════════════════════════ */}
-      {viewMode === 'all' && (
-        <div className="space-y-3">
-          {/* Backlog section */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-            <p className="text-sm font-bold text-slate-700 mb-3">📥 טרם שובץ</p>
-            <DayColumn
-              dateKey="backlog"
-              tasks={tasksByKey.get('backlog') ?? []}
-              isDropTarget={dragOverKey === 'backlog'}
-              hebrewDate=""
-              holiday={undefined}
-              onDragOver={(e) => handleDragOver(e, 'backlog')}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => handleDrop(e, 'backlog')}
-              categories={categories}
-              draggedId={draggedId}
-              pendingIds={pendingIds}
-              openMenuId={openMenuId}
-              moveOptions={moveOptions}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              onToggle={handleToggle}
-              onMove={moveTask}
-              onMenuToggle={handleMenuToggle}
-              onMenuMD={handleMenuMouseDown}
-              onEdit={(task) => setEditingTask(task)}
-            />
-          </div>
-
-          {/* Week accordion */}
-          {allWeeks.map((weekStart) => {
-            const key       = toDateStr(weekStart)
-            const weekDates = getWeekDates(weekStart)
-            const isOpen    = expandedWeeks.has(key)
-            const wLabel    = getWeekLabel(weekStart, weddingDate)
-            const isWedding = wLabel.includes('💍')
-
-            const weekTaskCount = weekDates.reduce(
-              (sum, d) => sum + (tasksByKey.get(toDateStr(d))?.length ?? 0),
-              0,
-            )
-
-            return (
-              <div
-                key={key}
-                className={`rounded-2xl border shadow-sm overflow-hidden ${
-                  isWedding ? 'border-violet-400 bg-violet-50/30' : 'border-slate-200 bg-white'
-                }`}
-              >
+          {/* ══ VIEW: SINGLE WEEK ═══════════════════════════════════════════ */}
+          {viewMode === 'week' && (
+            <div>
+              {/* Week navigation header */}
+              <div className="flex items-center gap-3 mb-4">
                 <button
-                  className="w-full flex items-center gap-3 px-4 py-3.5 text-right hover:bg-slate-50/60 transition-colors"
-                  onClick={() =>
-                    setExpandedWeeks((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(key)) next.delete(key)
-                      else next.add(key)
-                      return next
-                    })
-                  }
+                  onClick={() => setCurrentWeekStart((ws) => addWeeks(ws, -1))}
+                  className="p-2 rounded-xl bg-white border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors"
+                  aria-label="שבוע קודם"
                 >
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-bold ${isWedding ? 'text-violet-700' : 'text-slate-800'}`}>
-                      {wLabel}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-0.5">{weekRangeLabel(weekStart)}</p>
-                  </div>
-
-                  {weekTaskCount > 0 && (
-                    <span className="text-xs font-semibold text-violet-600 bg-violet-100 rounded-full px-2 py-0.5">
-                      {weekTaskCount} משימות
-                    </span>
-                  )}
-
-                  {isOpen
-                    ? <ChevronUp   size={16} className="text-slate-400 shrink-0" />
-                    : <ChevronDown size={16} className="text-slate-400 shrink-0" />
-                  }
+                  <ChevronRight size={16} />
                 </button>
 
-                {isOpen && (
-                  <div className="px-4 pb-4 border-t border-slate-100">
-                    <div className="mt-3">
+                <div className="flex-1 text-center">
+                  <p className="text-sm font-bold text-slate-800">
+                    {getWeekLabel(currentWeekStart, weddingDate)}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {weekRangeLabel(currentWeekStart)}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setCurrentWeekStart(getWeekStart(new Date()))}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-xl border transition-colors ${
+                    weeksToWedding === 0
+                      ? 'border-violet-400 bg-violet-50 text-violet-700'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-violet-300'
+                  }`}
+                >
+                  השבוע
+                </button>
+
+                <button
+                  onClick={() => setCurrentWeekStart((ws) => addWeeks(ws, 1))}
+                  className="p-2 rounded-xl bg-white border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors"
+                  aria-label="שבוע הבא"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+              </div>
+
+              <WeekGrid weekDates={currentWeekDates} tasksByKey={tasksByKey} {...sharedGridProps} />
+            </div>
+          )}
+
+          {/* ══ VIEW: ALL WEEKS (fully expanded, no accordion) ══════════════ */}
+          {viewMode === 'all' && (
+            <div className="space-y-4">
+              {allWeeks.map((weekStart) => {
+                const key       = toDateStr(weekStart)
+                const weekDates = getWeekDates(weekStart)
+                const wLabel    = getWeekLabel(weekStart, weddingDate)
+                const isWedding = wLabel.includes('💍')
+                const isPast    = wLabel === 'לאחר החתונה'
+
+                const weekTaskCount = weekDates.reduce(
+                  (sum, d) => sum + (tasksByKey.get(toDateStr(d))?.length ?? 0),
+                  0,
+                )
+
+                return (
+                  <div
+                    key={key}
+                    className={`rounded-2xl border overflow-hidden shadow-sm ${
+                      isWedding
+                        ? 'border-violet-400 bg-violet-50/20 shadow-violet-100'
+                        : isPast
+                          ? 'border-slate-100 bg-slate-50/50 opacity-60'
+                          : 'border-slate-200 bg-white'
+                    }`}
+                  >
+                    {/* Week header — always visible, no toggle */}
+                    <div
+                      className={`px-4 py-3 border-b flex items-center gap-3 ${
+                        isWedding ? 'border-violet-200 bg-violet-50/50' : 'border-slate-100 bg-slate-50/30'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-bold ${isWedding ? 'text-violet-700' : 'text-slate-800'}`}>
+                          {wLabel}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5 leading-none">
+                          {weekRangeLabel(weekStart)}
+                        </p>
+                      </div>
+                      {weekTaskCount > 0 && (
+                        <span className="text-xs font-semibold text-violet-600 bg-violet-100 rounded-full px-2 py-0.5 shrink-0">
+                          {weekTaskCount} משימות
+                        </span>
+                      )}
+                      {weekTaskCount === 0 && (
+                        <span className="text-xs text-slate-300 shrink-0">ריק</span>
+                      )}
+                    </div>
+
+                    {/* Week grid — always shown (no accordion) */}
+                    <div className="p-3">
                       <WeekGrid
                         weekDates={weekDates}
                         tasksByKey={tasksByKey}
-                        showBacklog={false}
                         {...sharedGridProps}
                       />
                     </div>
                   </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
+                )
+              })}
+            </div>
+          )}
 
-      {/* ── Category legend (dynamic) ─────────────────────────────────────── */}
+        </div>{/* /weeks area */}
+      </div>{/* /two-column layout */}
+
+      {/* ── Category legend ───────────────────────────────────────────────── */}
       {categories.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-6 pt-4 border-t border-slate-100">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-8 pt-4 border-t border-slate-100">
           {categories.map((cat, idx) => (
             <div key={cat.id} className="flex items-center gap-1.5">
-              <div
-                className={`w-2 h-2 rounded-full ${DOT_PALETTE[idx % DOT_PALETTE.length] ?? 'bg-slate-400'}`}
-              />
+              <div className={`w-2 h-2 rounded-full ${DOT_PALETTE[idx % DOT_PALETTE.length] ?? 'bg-slate-400'}`} />
               <span className="text-xs text-slate-400">{cat.name}</span>
             </div>
           ))}

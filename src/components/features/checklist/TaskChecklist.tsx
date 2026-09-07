@@ -14,6 +14,7 @@ import {
   ListTodo,
   Settings,
   ArrowRight,
+  Mail,
 } from 'lucide-react'
 import { updateTask, deleteTask, createTask } from '@/app/actions/tasks'
 import {
@@ -23,6 +24,7 @@ import {
 } from '@/app/actions/categories'
 import type { Task, Category, Priority, AssignedTo, TaskStatus } from '@/domain/types'
 import EditTaskModal from './EditTaskModal'
+import EmailModal from '@/components/ui/EmailModal'
 
 // ============================================================================
 // CONSTANTS
@@ -668,6 +670,9 @@ export default function TaskChecklist({
   // ── Edit task modal ───────────────────────────────────────────────────────
   const [editingTask, setEditingTask] = useState<Task | null>(null)
 
+  // ── Email modal ───────────────────────────────────────────────────────────
+  const [emailOpen, setEmailOpen] = useState(false)
+
   function handleSaveEdit(updated: Task) {
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
   }
@@ -924,6 +929,14 @@ export default function TaskChecklist({
         />
       )}
 
+      {emailOpen && (
+        <EmailModal
+          taskIds={filteredTasks.map((t) => t.id)}
+          defaultEmail={process.env.NEXT_PUBLIC_BRIDE_EMAIL ?? ''}
+          onClose={() => setEmailOpen(false)}
+        />
+      )}
+
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -932,13 +945,24 @@ export default function TaskChecklist({
             {totalDone} / {totalTasks} משימות הושלמו
           </p>
         </div>
-        <button
-          onClick={() => { setShowAddForm((v) => !v) }}
-          className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 active:bg-violet-800 transition-colors shadow-sm shadow-violet-200"
-        >
-          <Plus size={16} />
-          <span className="hidden sm:inline">הוסף משימה</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEmailOpen(true)}
+            title="שלחי רשימה במייל"
+            aria-label="שליחה למייל"
+            className="flex items-center gap-2 px-3 py-2 bg-white text-slate-600 text-sm font-medium rounded-xl hover:bg-violet-50 hover:text-violet-700 border border-slate-200 transition-colors"
+          >
+            <Mail size={15} />
+            <span className="hidden sm:inline">מייל</span>
+          </button>
+          <button
+            onClick={() => { setShowAddForm((v) => !v) }}
+            className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700 active:bg-violet-800 transition-colors shadow-sm shadow-violet-200"
+          >
+            <Plus size={16} />
+            <span className="hidden sm:inline">הוסף משימה</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Category tab bar + ⚙️ ────────────────────────────────────────── */}
