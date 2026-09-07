@@ -1,26 +1,26 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { CheckCircle2, Circle, Loader2, MoreHorizontal, X } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import {
+  CheckCircle2, Circle, Loader2, MoreHorizontal, X,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays,
+} from 'lucide-react'
 import { updateTask } from '@/app/actions/tasks'
 import type { Task, Priority, AssignedTo, TaskStatus } from '@/domain/types'
+import { WEDDING_DATE } from '@/config/wedding'
+import {
+  toDateStr, parseLocalDate, getWeekStart, getWeekDates, addWeeks,
+  getDayOfWeek, isToday, getAllWeeks, getWeekLabel, weeksUntilWedding,
+  buildCalendarMaps, type HolidayBadge,
+} from '@/utils/hebrewCalendar'
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const DAYS: { key: string; label: string }[] = [
-  { key: 'backlog',    label: 'טרם שובץ'   },
-  { key: 'sunday',    label: 'יום ראשון'  },
-  { key: 'monday',    label: 'יום שני'    },
-  { key: 'tuesday',   label: 'יום שלישי'  },
-  { key: 'wednesday', label: 'יום רביעי'  },
-  { key: 'thursday',  label: 'יום חמישי'  },
-  { key: 'friday',    label: 'יום שישי'   },
-]
+const DAY_LABELS = ['יום ראשון', 'יום שני', 'יום שלישי', 'יום רביעי', 'יום חמישי', 'יום שישי']
+const DAY_SHORT  = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי']
 
-
-// Color dot per built-in slug; custom categories fall back to slate
 const CATEGORY_DOT: Record<string, string> = {
   halacha_and_prep:      'bg-purple-400',
   groom_gifts:           'bg-pink-400',
@@ -30,15 +30,6 @@ const CATEGORY_DOT: Record<string, string> = {
   sheva_brachot:         'bg-indigo-400',
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  halacha_and_prep:      'הלכה והכנות',
-  groom_gifts:           'מתנות לחתן',
-  trousseau_and_home:    'נדוניה ובית',
-  bride_clothing:        'ביגוד וטיפוח',
-  logistics_and_vendors: 'לוגיסטיקה',
-  sheva_brachot:         'שבע ברכות',
-}
-
 const PRIORITY_BORDER: Record<Priority, string> = {
   high:   'border-r-[3px] border-red-400',
   medium: 'border-r-[3px] border-amber-400',
@@ -46,21 +37,26 @@ const PRIORITY_BORDER: Record<Priority, string> = {
 }
 
 const PRIORITY_TEXT: Record<Priority, string> = {
-  high:   'text-red-500',
-  medium: 'text-amber-500',
-  low:    'text-slate-400',
+  high: 'text-red-500', medium: 'text-amber-500', low: 'text-slate-400',
 }
 
-const PRIORITY_LABEL: Record<Priority, string> = {
-  high: 'גבוה', medium: 'בינוני', low: 'נמוך',
+const HOLIDAY_STYLE: Record<HolidayBadge['type'], string> = {
+  major:         'bg-amber-100  text-amber-800  border-amber-200',
+  erev:          'bg-yellow-50  text-yellow-700 border-yellow-200',
+  'chol-hamoed': 'bg-orange-50  text-orange-600 border-orange-200',
+  fast:          'bg-slate-100  text-slate-600  border-slate-200',
+  minor:         'bg-blue-50    text-blue-600   border-blue-200',
+  'rosh-chodesh':'bg-violet-50  text-violet-600 border-violet-200',
 }
 
 // ============================================================================
 // LOCAL TYPES
 // ============================================================================
 
+type ViewMode     = 'week' | 'all'
 type AssigneeFilter = 'all' | 'bride' | 'groom' | 'parents'
 interface ToastState { id: number; message: string }
+interface MoveOption  { key: string; label: string }
 
 // ============================================================================
 // TOAST
@@ -73,10 +69,24 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
       className="fixed top-4 inset-x-4 sm:inset-x-auto sm:right-4 sm:w-80 z-[100] flex items-center gap-3 bg-red-600 text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium"
     >
       <span className="flex-1 leading-snug">{toast.message}</span>
-      <button onClick={onClose} aria-label="סגור" className="shrink-0 hover:opacity-70 transition-opacity">
+      <button onClick={onClose} aria-label="סגור" className="shrink-0 hover:opacity-70">
         <X size={15} />
       </button>
     </div>
+  )
+}
+
+// ============================================================================
+// HOLIDAY BADGE — rendered inside column headers
+// ============================================================================
+
+function HolidayChip({ badge }: { badge: HolidayBadge }) {
+  return (
+    <span
+      className={`inline-block text-[9px] font-medium px-1.5 py-0.5 rounded-full border leading-tight ${HOLIDAY_STYLE[badge.type]}`}
+    >
+      {badge.text}
+    </span>
   )
 }
 
@@ -85,29 +95,27 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
 // ============================================================================
 
 interface PlannerCardProps {
-  task: Task
-  isDragging: boolean
-  isPending: boolean
-  isMenuOpen: boolean
-  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void
-  onDragEnd: () => void
-  onToggle: () => void
-  onMove: (targetDay: string) => void
+  task:          Task
+  isDragging:    boolean
+  isPending:     boolean
+  isMenuOpen:    boolean
+  moveOptions:   MoveOption[]
+  onDragStart:   (e: React.DragEvent<HTMLDivElement>) => void
+  onDragEnd:     () => void
+  onToggle:      () => void
+  onMove:        (targetKey: string) => void
   onMenuMouseDown: (e: React.MouseEvent) => void
-  onMenuClick: () => void
+  onMenuClick:   () => void
 }
 
 function PlannerCard({
-  task, isDragging, isPending, isMenuOpen,
-  onDragStart, onDragEnd,
-  onToggle, onMove,
-  onMenuMouseDown, onMenuClick,
+  task, isDragging, isPending, isMenuOpen, moveOptions,
+  onDragStart, onDragEnd, onToggle, onMove, onMenuMouseDown, onMenuClick,
 }: PlannerCardProps) {
-  const isDone     = task.status === 'DONE'
-  const pBorder    = PRIORITY_BORDER[task.priority]
-  const pText      = PRIORITY_TEXT[task.priority]
-  const dotCls   = CATEGORY_DOT[task.category]   ?? 'bg-slate-400'
-  const catLabel = CATEGORY_LABEL[task.category] ?? task.category
+  const isDone    = task.status === 'DONE'
+  const pBorder   = PRIORITY_BORDER[task.priority]
+  const pText     = PRIORITY_TEXT[task.priority]
+  const dotCls    = CATEGORY_DOT[task.category] ?? 'bg-slate-400'
 
   return (
     <div
@@ -116,94 +124,134 @@ function PlannerCard({
       onDragEnd={onDragEnd}
       className={`relative bg-white rounded-xl border ${pBorder} shadow-sm select-none
         cursor-grab active:cursor-grabbing transition-all duration-150
-        ${isDragging
-          ? 'opacity-40 scale-95 shadow-none'
-          : 'opacity-100 hover:shadow-md hover:-translate-y-px'
-        }`}
+        ${isDragging ? 'opacity-40 scale-95 shadow-none' : 'opacity-100 hover:shadow-md hover:-translate-y-px'}`}
     >
       <div className="flex items-start gap-2 p-3">
+        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotCls}`} />
 
-        {/* Category dot */}
-        <div
-          className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotCls}`}
-          title={catLabel}
-        />
-
-        {/* Title + priority label */}
         <div className="flex-1 min-w-0">
           <p
-            className={`text-xs font-medium leading-snug break-words transition-all ${
+            className={`text-xs font-medium leading-snug break-words ${
               isDone ? 'line-through text-slate-400' : 'text-slate-700'
             }`}
           >
             {task.title}
           </p>
-          <span className={`text-[10px] font-semibold mt-0.5 block ${pText}`}>
-            {PRIORITY_LABEL[task.priority]}
-          </span>
+          <p className={`text-[10px] mt-0.5 ${pText}`}>
+            {task.priority === 'high' ? '● גבוה' : task.priority === 'medium' ? '● בינוני' : ''}
+          </p>
         </div>
 
-        {/* Actions column */}
-        <div className="flex flex-col items-center gap-1.5 shrink-0">
+        {/* Checkbox */}
+        <button
+          onClick={onToggle}
+          disabled={isPending}
+          aria-label={isDone ? 'בטל' : 'סמן כהושלם'}
+          className="shrink-0 text-slate-300 hover:text-violet-500 transition-colors disabled:opacity-40"
+        >
+          {isPending ? (
+            <Loader2 size={14} className="animate-spin text-violet-400" />
+          ) : isDone ? (
+            <CheckCircle2 size={14} className="text-violet-500" />
+          ) : (
+            <Circle size={14} />
+          )}
+        </button>
 
-          {/* Status toggle */}
+        {/* Quick-move menu */}
+        <div className="relative shrink-0">
           <button
-            onClick={(e) => { e.stopPropagation(); onToggle() }}
-            disabled={isPending}
-            aria-label={isDone ? 'סמן כלא הושלם' : 'סמן כהושלם'}
-            className="text-slate-300 hover:text-violet-500 transition-colors disabled:opacity-40"
+            onMouseDown={onMenuMouseDown}
+            onClick={onMenuClick}
+            aria-label="העבר ליום אחר"
+            className="p-0.5 text-slate-300 hover:text-slate-600 transition-colors rounded"
           >
-            {isPending ? (
-              <Loader2 size={15} className="animate-spin text-violet-400" />
-            ) : isDone ? (
-              <CheckCircle2 size={15} className="text-violet-600" />
-            ) : (
-              <Circle size={15} />
-            )}
+            <MoreHorizontal size={14} />
           </button>
 
-          {/* Quick-move menu */}
-          <div className="relative">
-            <button
-              onMouseDown={onMenuMouseDown}
-              onClick={(e) => { e.stopPropagation(); onMenuClick() }}
-              aria-label="שבץ ליום"
-              className="text-slate-300 hover:text-slate-600 transition-colors"
+          {isMenuOpen && (
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              className="absolute left-0 top-6 z-30 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[160px]"
             >
-              <MoreHorizontal size={14} />
-            </button>
-
-            {isMenuOpen && (
-              <div
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                className="absolute right-0 top-full mt-1 bg-white rounded-xl border border-slate-200 shadow-lg z-50 min-w-[152px] py-1 overflow-hidden"
-              >
-                <p className="px-3 py-1.5 text-[10px] text-slate-400 font-semibold tracking-wider uppercase border-b border-slate-100">
-                  שבץ ליום
-                </p>
-                {DAYS.map((day) => {
-                  const isCurrent = task.assignedDay === day.key
-                  return (
-                    <button
-                      key={day.key}
-                      onClick={() => onMove(day.key)}
-                      className={`w-full text-right px-3 py-2 text-xs transition-colors flex items-center justify-between ${
-                        isCurrent
-                          ? 'bg-violet-50 text-violet-700 font-semibold'
-                          : 'text-slate-700 hover:bg-violet-50 hover:text-violet-700'
-                      }`}
-                    >
-                      <span>{day.label}</span>
-                      {isCurrent && <span className="text-violet-500 text-[10px]">✓</span>}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+              {moveOptions.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => { onMove(opt.key) }}
+                  className="w-full text-right px-3 py-2 text-xs text-slate-600 hover:bg-violet-50 hover:text-violet-700 transition-colors"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// DAY COLUMN HEADER
+// ============================================================================
+
+function DayColumnHeader({
+  label,
+  shortLabel,
+  hebrewDate,
+  holiday,
+  isToday: today,
+  dateStr,
+  taskCount,
+}: {
+  label:      string
+  shortLabel: string
+  hebrewDate: string
+  holiday:    HolidayBadge | undefined
+  isToday:    boolean
+  dateStr:    string   // YYYY-MM-DD, or 'backlog'
+  taskCount:  number
+}) {
+  const isBacklog = dateStr === 'backlog'
+  // Format Gregorian date as "6 ספטמבר"
+  const gregLabel = isBacklog ? '' : (() => {
+    const d = parseLocalDate(dateStr)
+    return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
+  })()
+
+  return (
+    <div className={`pb-2 mb-2 border-b border-slate-100 ${today ? 'border-violet-200' : ''}`}>
+      <div className="flex items-center gap-2">
+        <p
+          className={`text-xs font-bold leading-none ${
+            today ? 'text-violet-700' : 'text-slate-700'
+          }`}
+        >
+          <span className="hidden sm:inline">{label}</span>
+          <span className="sm:hidden">{shortLabel}</span>
+        </p>
+        {today && (
+          <span className="text-[9px] font-semibold bg-violet-600 text-white rounded-full px-1.5 py-0.5">
+            היום
+          </span>
+        )}
+        {taskCount > 0 && (
+          <span className="ms-auto text-[10px] font-semibold text-slate-400 bg-slate-100 rounded-full px-1.5 py-0.5">
+            {taskCount}
+          </span>
+        )}
+      </div>
+      {!isBacklog && (
+        <p className="text-[10px] text-slate-400 mt-0.5 leading-none">
+          {hebrewDate}
+          {gregLabel && <span className="text-[9px] opacity-60 ms-1.5">· {gregLabel}</span>}
+        </p>
+      )}
+      {holiday && (
+        <div className="mt-1">
+          <HolidayChip badge={holiday} />
+        </div>
+      )}
     </div>
   )
 }
@@ -213,121 +261,259 @@ function PlannerCard({
 // ============================================================================
 
 interface DayColumnProps {
-  day: { key: string; label: string }
-  tasks: Task[]
-  draggedTaskId: string | null
-  isDragOver: boolean
-  pendingIds: Set<string>
-  openMenuId: string | null
-  onDragOver: (e: React.DragEvent<HTMLDivElement>) => void
-  onDragLeave: (e: React.DragEvent<HTMLDivElement>) => void
-  onDrop: (e: React.DragEvent<HTMLDivElement>) => void
-  onCardDragStart: (e: React.DragEvent<HTMLDivElement>, taskId: string) => void
-  onCardDragEnd: () => void
-  onToggle: (task: Task) => void
-  onMove: (taskId: string, targetDay: string) => void
-  onMenuMouseDown: (e: React.MouseEvent) => void
-  onMenuClick: (taskId: string) => void
+  dateKey:      string          // 'backlog' or 'YYYY-MM-DD'
+  dayIndex?:    number          // 0=Sun…5=Fri, undefined for backlog
+  tasks:        Task[]
+  isDropTarget: boolean
+  hebrewDate:   string
+  holiday:      HolidayBadge | undefined
+  draggedId:    string | null
+  pendingIds:   Set<string>
+  openMenuId:   string | null
+  moveOptions:  MoveOption[]
+  onDragOver:   (e: React.DragEvent) => void
+  onDragLeave:  (e: React.DragEvent) => void
+  onDrop:       (e: React.DragEvent) => void
+  onDragStart:  (e: React.DragEvent<HTMLDivElement>, id: string) => void
+  onDragEnd:    () => void
+  onToggle:     (task: Task) => void
+  onMove:       (taskId: string, targetKey: string) => void
+  onMenuToggle: (id: string) => void
+  onMenuMD:     (e: React.MouseEvent, id: string) => void
 }
 
 function DayColumn({
-  day, tasks, draggedTaskId, isDragOver, pendingIds, openMenuId,
+  dateKey, dayIndex, tasks, isDropTarget,
+  hebrewDate, holiday, draggedId, pendingIds,
+  openMenuId, moveOptions,
   onDragOver, onDragLeave, onDrop,
-  onCardDragStart, onCardDragEnd,
-  onToggle, onMove,
-  onMenuMouseDown, onMenuClick,
+  onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD,
 }: DayColumnProps) {
-  const isBacklog = day.key === 'backlog'
+  const isBacklog = dateKey === 'backlog'
+  const label      = isBacklog ? 'טרם שובץ'   : (DAY_LABELS[dayIndex!]  ?? '')
+  const shortLabel = isBacklog ? 'בלוג'       : (DAY_SHORT[dayIndex!]   ?? '')
+  const today      = !isBacklog && isToday(parseLocalDate(dateKey))
 
   return (
-    <div className="flex flex-col w-44 md:w-auto md:flex-1 shrink-0 min-h-0">
+    <div
+      className={`flex flex-col min-w-[140px] sm:min-w-0 sm:flex-1 rounded-2xl border-2 transition-colors duration-150 p-3 ${
+        isDropTarget
+          ? 'border-violet-400 bg-violet-50/60'
+          : 'border-transparent bg-slate-50/60'
+      } ${today ? 'bg-violet-50/30' : ''}`}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      <DayColumnHeader
+        label={label}
+        shortLabel={shortLabel}
+        hebrewDate={hebrewDate}
+        holiday={holiday}
+        isToday={today}
+        dateStr={dateKey}
+        taskCount={tasks.length}
+      />
 
-      {/* Column header */}
-      <div
-        className={`flex items-center justify-between px-3 py-2.5 rounded-t-xl border-x border-t text-sm font-semibold ${
-          isBacklog
-            ? 'bg-slate-100 border-slate-300 text-slate-500'
-            : 'bg-violet-600 border-violet-600 text-white'
-        }`}
-      >
-        <span className="text-xs font-bold tracking-wide">{day.label}</span>
-        <span
-          className={`text-[10px] rounded-full px-1.5 py-0.5 font-semibold min-w-[18px] text-center ${
-            isBacklog ? 'bg-slate-200 text-slate-500' : 'bg-white/25 text-white'
-          }`}
-        >
-          {tasks.length}
-        </span>
-      </div>
-
-      {/* Drop zone */}
-      <div
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        className={`flex-1 flex flex-col gap-2 p-2 rounded-b-xl border-x border-b min-h-[200px] transition-all duration-150 ${
-          isDragOver
-            ? 'bg-violet-50 border-violet-400 border-dashed border-2'
-            : isBacklog
-            ? 'bg-slate-50/70 border-slate-200'
-            : 'bg-white border-slate-200'
-        }`}
-      >
-        {tasks.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center min-h-[80px]">
-            <p className="text-xs text-slate-300 text-center leading-relaxed px-2">
-              {isDragOver ? '⬇ שחרר כאן' : isBacklog ? 'לא משובצות' : 'ריק'}
-            </p>
-          </div>
-        ) : (
-          tasks.map((task) => (
-            <PlannerCard
-              key={task.id}
-              task={task}
-              isDragging={draggedTaskId === task.id}
-              isPending={pendingIds.has(task.id)}
-              isMenuOpen={openMenuId === task.id}
-              onDragStart={(e) => onCardDragStart(e, task.id)}
-              onDragEnd={onCardDragEnd}
-              onToggle={() => onToggle(task)}
-              onMove={(targetDay) => onMove(task.id, targetDay)}
-              onMenuMouseDown={onMenuMouseDown}
-              onMenuClick={() => onMenuClick(task.id)}
-            />
-          ))
-        )}
+      <div className="flex-1 space-y-2 min-h-[60px]">
+        {tasks.map((task) => (
+          <PlannerCard
+            key={task.id}
+            task={task}
+            isDragging={draggedId === task.id}
+            isPending={pendingIds.has(task.id)}
+            isMenuOpen={openMenuId === task.id}
+            moveOptions={moveOptions.filter((o) => o.key !== dateKey)}
+            onDragStart={(e) => onDragStart(e, task.id)}
+            onDragEnd={onDragEnd}
+            onToggle={() => onToggle(task)}
+            onMove={(targetKey) => onMove(task.id, targetKey)}
+            onMenuMouseDown={(e) => onMenuMD(e, task.id)}
+            onMenuClick={() => onMenuToggle(task.id)}
+          />
+        ))}
       </div>
     </div>
   )
 }
 
 // ============================================================================
-// WEEKLY PLANNER — main component
+// WEEK GRID — renders backlog + 6 day columns for one week
 // ============================================================================
 
+interface WeekGridProps {
+  weekDates:    Date[]           // 6 Date objects (Sun–Fri)
+  tasksByKey:   Map<string, Task[]>
+  hebrewDates:  Map<string, string>
+  holidays:     Map<string, HolidayBadge>
+  dragOverKey:  string | null
+  draggedId:    string | null
+  pendingIds:   Set<string>
+  openMenuId:   string | null
+  moveOptions:  MoveOption[]
+  showBacklog:  boolean
+  onDragOver:   (e: React.DragEvent, key: string) => void
+  onDragLeave:  (e: React.DragEvent) => void
+  onDrop:       (e: React.DragEvent, key: string) => void
+  onDragStart:  (e: React.DragEvent<HTMLDivElement>, id: string) => void
+  onDragEnd:    () => void
+  onToggle:     (task: Task) => void
+  onMove:       (taskId: string, targetKey: string) => void
+  onMenuToggle: (id: string) => void
+  onMenuMD:     (e: React.MouseEvent, id: string) => void
+}
+
+function WeekGrid({
+  weekDates, tasksByKey, hebrewDates, holidays,
+  dragOverKey, draggedId, pendingIds, openMenuId, moveOptions,
+  showBacklog,
+  onDragOver, onDragLeave, onDrop, onDragStart, onDragEnd,
+  onToggle, onMove, onMenuToggle, onMenuMD,
+}: WeekGridProps) {
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+      {showBacklog && (
+        <DayColumn
+          dateKey="backlog"
+          tasks={tasksByKey.get('backlog') ?? []}
+          isDropTarget={dragOverKey === 'backlog'}
+          hebrewDate=""
+          holiday={undefined}
+          draggedId={draggedId}
+          pendingIds={pendingIds}
+          openMenuId={openMenuId}
+          moveOptions={moveOptions}
+          onDragOver={(e) => onDragOver(e, 'backlog')}
+          onDragLeave={onDragLeave}
+          onDrop={(e) => onDrop(e, 'backlog')}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onToggle={onToggle}
+          onMove={onMove}
+          onMenuToggle={onMenuToggle}
+          onMenuMD={onMenuMD}
+        />
+      )}
+
+      {weekDates.map((date, idx) => {
+        const key = toDateStr(date)
+        return (
+          <DayColumn
+            key={key}
+            dateKey={key}
+            dayIndex={idx}
+            tasks={tasksByKey.get(key) ?? []}
+            isDropTarget={dragOverKey === key}
+            hebrewDate={hebrewDates.get(key) ?? ''}
+            holiday={holidays.get(key)}
+            draggedId={draggedId}
+            pendingIds={pendingIds}
+            openMenuId={openMenuId}
+            moveOptions={moveOptions}
+            onDragOver={(e) => onDragOver(e, key)}
+            onDragLeave={onDragLeave}
+            onDrop={(e) => onDrop(e, key)}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onToggle={onToggle}
+            onMove={onMove}
+            onMenuToggle={onMenuToggle}
+            onMenuMD={onMenuMD}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+const HEBREW_MONTHS_LONG: Record<number, string> = {
+  0: 'ינואר', 1: 'פברואר', 2: 'מרץ', 3: 'אפריל', 4: 'מאי', 5: 'יוני',
+  6: 'יולי', 7: 'אוגוסט', 8: 'ספטמבר', 9: 'אוקטובר', 10: 'נובמבר', 11: 'דצמבר',
+}
+
 export default function WeeklyPlanner({ initialTasks }: { initialTasks: Task[] }) {
+  const weddingDate = useMemo(() => parseLocalDate(WEDDING_DATE), [])
 
   // ── Core state ────────────────────────────────────────────────────────────
-  const [tasks, setTasks]               = useState<Task[]>(initialTasks)
-  const [draggedTaskId, setDraggedTask] = useState<string | null>(null)
-  const [dragOverColumn, setDragOver]   = useState<string | null>(null)
-  const [pendingIds, setPendingIds]     = useState<Set<string>>(new Set())
-  const [openMenuId, setOpenMenuId]     = useState<string | null>(null)
-  const [toast, setToast]               = useState<ToastState | null>(null)
+  const [tasks, setTasks]           = useState<Task[]>(initialTasks)
+  const [viewMode, setViewMode]     = useState<ViewMode>('week')
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStart(new Date()))
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(
+    () => new Set([toDateStr(getWeekStart(new Date()))]),
+  )
 
   // Filters
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all')
-  const [categoryFilter, setCategoryFilter] = useState<string | 'all'>('all')
   const [showDone, setShowDone]             = useState(false)
 
+  // DnD
+  const [draggedId, setDraggedId]   = useState<string | null>(null)
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+
+  // UI
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [toast, setToast]           = useState<ToastState | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ── Close open menu when clicking anywhere else ───────────────────────────
+  // ── Calendar maps (computed once) ─────────────────────────────────────────
+  const { hebrewDates, holidays } = useMemo(() => {
+    const from = addWeeks(getWeekStart(new Date()), -8)   // buffer before today
+    const to   = addWeeks(weddingDate, 2)                  // buffer after wedding
+    return buildCalendarMaps(from, to)
+  }, [weddingDate])
+
+  // ── All weeks list ────────────────────────────────────────────────────────
+  const allWeeks = useMemo(() => getAllWeeks(new Date(), weddingDate), [weddingDate])
+
+  // ── Filtered + keyed tasks ────────────────────────────────────────────────
+  const visibleTasks = useMemo(() =>
+    tasks
+      .filter((t) => showDone || t.status !== 'DONE')
+      .filter((t) => {
+        if (assigneeFilter === 'all') return true
+        if (assigneeFilter === 'parents')
+          return t.assignedTo === 'parents_bride' || t.assignedTo === 'parents_groom'
+        return t.assignedTo === (assigneeFilter as AssignedTo)
+      }),
+  [tasks, showDone, assigneeFilter])
+
+  const tasksByKey = useMemo(() => {
+    const map = new Map<string, Task[]>()
+    for (const task of visibleTasks) {
+      const key = task.dueDate ?? 'backlog'
+      const arr = map.get(key) ?? []
+      arr.push(task)
+      map.set(key, arr)
+    }
+    return map
+  }, [visibleTasks])
+
+  // ── Week dates for current-week view ──────────────────────────────────────
+  const currentWeekDates = useMemo(() => getWeekDates(currentWeekStart), [currentWeekStart])
+
+  // ── Move options for quick-move menu ──────────────────────────────────────
+  const moveOptions: MoveOption[] = useMemo(() => {
+    const weekDates = viewMode === 'week' ? currentWeekDates : getWeekDates(getWeekStart(new Date()))
+    return [
+      { key: 'backlog', label: 'טרם שובץ (בלוג)' },
+      ...weekDates.map((d, i) => ({
+        key:   toDateStr(d),
+        label: `${DAY_SHORT[i] ?? ''} · ${hebrewDates.get(toDateStr(d)) ?? ''}`,
+      })),
+    ]
+  }, [viewMode, currentWeekDates, hebrewDates])
+
+  // ── Close open menu on outside click ─────────────────────────────────────
   useEffect(() => {
     if (!openMenuId) return
-    function handleDocMouseDown() { setOpenMenuId(null) }
-    document.addEventListener('mousedown', handleDocMouseDown)
-    return () => document.removeEventListener('mousedown', handleDocMouseDown)
+    const handler = () => setOpenMenuId(null)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [openMenuId])
 
   // ── Toast ─────────────────────────────────────────────────────────────────
@@ -337,252 +523,369 @@ export default function WeeklyPlanner({ initialTasks }: { initialTasks: Task[] }
     toastTimer.current = setTimeout(() => setToast(null), 3500)
   }, [])
 
-  // ── Pending helpers ───────────────────────────────────────────────────────
-  function addPending(id: string) {
-    setPendingIds((p) => new Set([...p, id]))
-  }
-  function removePending(id: string) {
-    setPendingIds((p) => { const n = new Set(p); n.delete(id); return n })
-  }
-
-  // ── Move a task to a different day (drag-drop + quick-move) ──────────────
-  async function moveTask(taskId: string, newDay: string) {
+  // ── Move task ─────────────────────────────────────────────────────────────
+  async function moveTask(taskId: string, targetKey: string) {
+    if (pendingIds.has(taskId)) return
     const task = tasks.find((t) => t.id === taskId)
-    if (!task || task.assignedDay === newDay || pendingIds.has(taskId)) return
+    if (!task) return
 
-    const prevDay = task.assignedDay
+    const isBacklog = targetKey === 'backlog'
+    const updates = {
+      dueDate:    isBacklog ? null : targetKey,
+      assignedDay: isBacklog ? 'backlog' : getDayOfWeek(parseLocalDate(targetKey)),
+    } as Partial<Task> & { dueDate?: string | null }
 
-    addPending(taskId)
+    const prevTasks = tasks
     setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, assignedDay: newDay } : t))
+      prev.map((t) =>
+        t.id === taskId ? { ...t, dueDate: isBacklog ? undefined : targetKey, assignedDay: updates.assignedDay! } : t,
+      ),
     )
+    setPendingIds((prev) => new Set([...prev, taskId]))
+    setOpenMenuId(null)
 
-    const result = await updateTask(taskId, { assignedDay: newDay })
-    removePending(taskId)
-
+    const result = await updateTask(taskId, updates)
+    setPendingIds((prev) => { const n = new Set(prev); n.delete(taskId); return n })
     if (!result.success) {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, assignedDay: prevDay } : t))
-      )
-      showToast(result.error)
-    } else {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === taskId ? result.data : t))
-      )
+      setTasks(prevTasks)
+      showToast(`שגיאה בהזזת המשימה: ${result.error}`)
     }
   }
 
-  // ── Toggle task status ────────────────────────────────────────────────────
+  // ── Toggle done ───────────────────────────────────────────────────────────
   async function handleToggle(task: Task) {
     if (pendingIds.has(task.id)) return
     const newStatus: TaskStatus = task.status === 'DONE' ? 'TODO' : 'DONE'
-
-    addPending(task.id)
-    setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t))
-    )
-
+    setPendingIds((prev) => new Set([...prev, task.id]))
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t)))
     const result = await updateTask(task.id, { status: newStatus })
-    removePending(task.id)
-
+    setPendingIds((prev) => { const n = new Set(prev); n.delete(task.id); return n })
     if (!result.success) {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? { ...t, status: task.status } : t))
-      )
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: task.status } : t)))
       showToast(result.error)
-    } else {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? result.data : t))
-      )
     }
   }
 
-  // ── Drag handlers ─────────────────────────────────────────────────────────
-
+  // ── DnD handlers ──────────────────────────────────────────────────────────
   function handleDragStart(e: React.DragEvent<HTMLDivElement>, taskId: string) {
-    e.dataTransfer.setData('text/plain', taskId)
-    e.dataTransfer.effectAllowed = 'move'
-    // Defer opacity change so the drag ghost captures the normal card first
-    setTimeout(() => setDraggedTask(taskId), 0)
+    e.dataTransfer.setData('taskId', taskId)
+    setTimeout(() => setDraggedId(taskId), 0)
   }
 
   function handleDragEnd() {
-    setDraggedTask(null)
-    setDragOver(null)
+    setDraggedId(null)
+    setDragOverKey(null)
   }
 
-  function handleDragOver(e: React.DragEvent<HTMLDivElement>, dayKey: string) {
+  function handleDragOver(e: React.DragEvent, key: string) {
     e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (dragOverColumn !== dayKey) setDragOver(dayKey)
+    setDragOverKey(key)
   }
 
-  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
-    // Only clear when leaving the column boundary, not when entering a child
-    const related = e.relatedTarget as Node | null
-    if (!e.currentTarget.contains(related)) {
-      setDragOver(null)
-    }
+  function handleDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverKey(null)
   }
 
-  function handleDrop(e: React.DragEvent<HTMLDivElement>, targetDay: string) {
+  function handleDrop(e: React.DragEvent, key: string) {
     e.preventDefault()
-    const taskId = e.dataTransfer.getData('text/plain')
-    setDraggedTask(null)
-    setDragOver(null)
-    if (taskId) void moveTask(taskId, targetDay)
+    const taskId = e.dataTransfer.getData('taskId')
+    if (taskId) void moveTask(taskId, key)
+    setDraggedId(null)
+    setDragOverKey(null)
   }
 
-  // ── Quick-move (menu) ─────────────────────────────────────────────────────
-
-  function handleQuickMove(taskId: string, targetDay: string) {
-    setOpenMenuId(null) // close menu immediately
-    void moveTask(taskId, targetDay)
+  // ── Menu handlers ─────────────────────────────────────────────────────────
+  function handleMenuToggle(id: string) {
+    setOpenMenuId((prev) => (prev === id ? null : id))
   }
 
-  function handleMenuMouseDown(e: React.MouseEvent) {
-    // Prevent the document mousedown listener from immediately closing the menu
+  function handleMenuMouseDown(e: React.MouseEvent, id: string) {
     e.stopPropagation()
+    setOpenMenuId((prev) => (prev === id ? null : id))
   }
 
-  function handleMenuClick(taskId: string) {
-    setOpenMenuId((prev) => (prev === taskId ? null : taskId))
+  // ── Shared column props ───────────────────────────────────────────────────
+  const sharedColProps = {
+    hebrewDates, holidays, dragOverKey, draggedId, pendingIds,
+    openMenuId, moveOptions,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+    onDragStart: handleDragStart,
+    onDragEnd: handleDragEnd,
+    onToggle: handleToggle,
+    onMove: moveTask,
+    onMenuToggle: handleMenuToggle,
+    onMenuMD: handleMenuMouseDown,
   }
 
-  // ── Filtered tasks per column ─────────────────────────────────────────────
-
-  function getColumnTasks(dayKey: string): Task[] {
-    return tasks
-      .filter((t) => t.assignedDay === dayKey)
-      .filter((t) => showDone || t.status !== 'DONE')
-      .filter((t) => {
-        if (assigneeFilter === 'all') return true
-        if (assigneeFilter === 'parents')
-          return t.assignedTo === 'parents_bride' || t.assignedTo === 'parents_groom'
-        return t.assignedTo === (assigneeFilter as AssignedTo)
-      })
-      .filter((t) => categoryFilter === 'all' || t.category === categoryFilter)
+  // ── Week header for navigation ────────────────────────────────────────────
+  function weekRangeLabel(weekStart: Date): string {
+    const dates = getWeekDates(weekStart)
+    const first = dates[0]!
+    const last  = dates[5]!
+    if (first.getMonth() === last.getMonth()) {
+      return `${first.getDate()}–${last.getDate()} ${HEBREW_MONTHS_LONG[first.getMonth()] ?? ''} ${first.getFullYear()}`
+    }
+    return `${first.getDate()} ${HEBREW_MONTHS_LONG[first.getMonth()] ?? ''}–${last.getDate()} ${HEBREW_MONTHS_LONG[last.getMonth()] ?? ''}`
   }
 
-  const totalTasks = tasks.length
-  const totalDone  = tasks.filter((t) => t.status === 'DONE').length
-  const totalShown = DAYS.reduce((sum, d) => sum + getColumnTasks(d.key).length, 0)
+  const n = weeksUntilWedding(currentWeekStart, weddingDate)
 
   // ============================================================================
   // RENDER
   // ============================================================================
 
   return (
-    <div className="flex flex-col px-4 pt-6 pb-4 md:px-6 md:pt-8 h-full min-h-screen">
-
+    <div className="px-4 py-6 md:px-8 md:py-8">
       {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
 
-      {/* ── Header ───────────────────────────────────────────────────── */}
-      <div className="mb-5">
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-800">לו&quot;ז שבועי</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          {totalDone} מתוך {totalTasks} משימות הושלמו
-        </p>
-      </div>
+      {/* ── Page header ───────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
+        <div className="flex-1">
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-800">לוח תכנון שבועי</h1>
+          <p className="text-slate-500 text-sm mt-0.5">
+            גרור משימות לתאריכים · לחץ ✓ לסיום
+          </p>
+        </div>
 
-      {/* ── Filters ──────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-3 items-center mb-5">
-
-        {/* Assignee pills */}
-        <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 gap-0.5">
-          {(
-            [
-              ['all',     'כולם']  ,
-              ['bride',   'כלה']   ,
-              ['groom',   'חתן']   ,
-              ['parents', 'הורים'] ,
-            ] as [AssigneeFilter, string][]
-          ).map(([val, label]) => (
+        {/* View mode toggle */}
+        <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 gap-1 self-start">
+          {(['week', 'all'] as ViewMode[]).map((mode) => (
             <button
-              key={val}
-              onClick={() => setAssigneeFilter(val)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap ${
-                assigneeFilter === val
-                  ? 'bg-violet-600 text-white'
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                viewMode === mode
+                  ? 'bg-violet-600 text-white shadow-sm'
                   : 'text-slate-500 hover:bg-slate-50'
               }`}
             >
-              {label}
+              <CalendarDays size={13} />
+              {mode === 'week' ? 'שבוע נוכחי' : 'כל השבועות'}
             </button>
           ))}
         </div>
+      </div>
 
-        {/* Category select */}
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 text-slate-600"
-        >
-          <option value="all">כל הקטגוריות</option>
-          {Object.entries(CATEGORY_LABEL).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
-          ))}
-        </select>
+      {/* ── Filters ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        {/* Assignee filter */}
+        {(['all', 'bride', 'groom', 'parents'] as AssigneeFilter[]).map((v) => {
+          const labels: Record<AssigneeFilter, string> = {
+            all: 'כולם', bride: 'כלה', groom: 'חתן', parents: 'הורים',
+          }
+          return (
+            <button
+              key={v}
+              onClick={() => setAssigneeFilter(v)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                assigneeFilter === v
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-white text-slate-500 border border-slate-200 hover:border-violet-300'
+              }`}
+            >
+              {labels[v]}
+            </button>
+          )
+        })}
 
-        {/* Show-done toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none">
+        {/* Show done toggle */}
+        <label className="flex items-center gap-2 ms-auto cursor-pointer select-none">
+          <span className="text-xs text-slate-500">הצג הושלמו</span>
           <div
             onClick={() => setShowDone((v) => !v)}
-            role="switch"
-            aria-checked={showDone}
-            className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer ${
-              showDone ? 'bg-violet-600' : 'bg-slate-200'
-            }`}
+            className={`relative w-9 h-5 rounded-full transition-colors ${showDone ? 'bg-violet-600' : 'bg-slate-200'}`}
           >
-            <div
-              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${
-                showDone ? 'translate-x-4' : 'translate-x-0'
+            <span
+              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                showDone ? 'translate-x-4' : 'translate-x-0.5'
               }`}
             />
           </div>
-          <span className="text-xs font-medium text-slate-600 whitespace-nowrap">
-            הצג משימות שבוצעו
-          </span>
         </label>
-
-        {/* Visible count */}
-        <span className="text-xs text-slate-400 ms-auto">
-          {totalShown} משימות בתצוגה
-        </span>
       </div>
 
-      {/* ── Board (horizontal scroll) ─────────────────────────────────── */}
-      <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide flex-1 items-start">
-        {DAYS.map((day) => (
-          <DayColumn
-            key={day.key}
-            day={day}
-            tasks={getColumnTasks(day.key)}
-            draggedTaskId={draggedTaskId}
-            isDragOver={dragOverColumn === day.key}
-            pendingIds={pendingIds}
-            openMenuId={openMenuId}
-            onDragOver={(e) => handleDragOver(e, day.key)}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, day.key)}
-            onCardDragStart={handleDragStart}
-            onCardDragEnd={handleDragEnd}
-            onToggle={handleToggle}
-            onMove={handleQuickMove}
-            onMenuMouseDown={handleMenuMouseDown}
-            onMenuClick={handleMenuClick}
-          />
-        ))}
-      </div>
+      {/* ══════════════════════════════════════════════════════════════════
+          VIEW: CURRENT WEEK
+      ══════════════════════════════════════════════════════════════════ */}
+      {viewMode === 'week' && (
+        <div>
+          {/* Week navigation header */}
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              onClick={() => setCurrentWeekStart((ws) => addWeeks(ws, -1))}
+              className="p-2 rounded-xl bg-white border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors"
+              aria-label="שבוע קודם"
+            >
+              <ChevronRight size={16} />
+            </button>
 
-      {/* ── Legend ───────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 pt-4 border-t border-slate-100">
-        {Object.entries(CATEGORY_DOT).map(([cat, dotCls]) => (
-          <div key={cat} className="flex items-center gap-1.5">
-            <div className={`w-2 h-2 rounded-full ${dotCls}`} />
-            <span className="text-xs text-slate-400">{CATEGORY_LABEL[cat] ?? cat}</span>
+            <div className="flex-1 text-center">
+              <p className="text-sm font-bold text-slate-800">
+                {getWeekLabel(currentWeekStart, weddingDate)}
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {weekRangeLabel(currentWeekStart)}
+              </p>
+            </div>
+
+            <button
+              onClick={() => setCurrentWeekStart(getWeekStart(new Date()))}
+              title="חזור לשבוע הנוכחי"
+              className={`px-3 py-1.5 text-xs font-medium rounded-xl border transition-colors ${
+                n === 0
+                  ? 'border-violet-400 bg-violet-50 text-violet-700'
+                  : 'border-slate-200 bg-white text-slate-500 hover:border-violet-300'
+              }`}
+            >
+              השבוע
+            </button>
+
+            <button
+              onClick={() => setCurrentWeekStart((ws) => addWeeks(ws, 1))}
+              className="p-2 rounded-xl bg-white border border-slate-200 hover:border-violet-300 text-slate-500 hover:text-violet-700 transition-colors"
+              aria-label="שבוע הבא"
+            >
+              <ChevronLeft size={16} />
+            </button>
           </div>
-        ))}
+
+          <WeekGrid
+            weekDates={currentWeekDates}
+            tasksByKey={tasksByKey}
+            showBacklog={true}
+            {...sharedColProps}
+          />
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          VIEW: ALL WEEKS
+      ══════════════════════════════════════════════════════════════════ */}
+      {viewMode === 'all' && (
+        <div className="space-y-3">
+          {/* Backlog — always at top in all-weeks view */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+            <p className="text-sm font-bold text-slate-700 mb-3">📥 טרם שובץ</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              <DayColumn
+                dateKey="backlog"
+                tasks={tasksByKey.get('backlog') ?? []}
+                isDropTarget={dragOverKey === 'backlog'}
+                hebrewDate=""
+                holiday={undefined}
+                draggedId={draggedId}
+                pendingIds={pendingIds}
+                openMenuId={openMenuId}
+                moveOptions={moveOptions}
+                onDragOver={(e) => handleDragOver(e, 'backlog')}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, 'backlog')}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onToggle={handleToggle}
+                onMove={moveTask}
+                onMenuToggle={handleMenuToggle}
+                onMenuMD={handleMenuMouseDown}
+              />
+            </div>
+          </div>
+
+          {/* Week accordion */}
+          {allWeeks.map((weekStart) => {
+            const key       = toDateStr(weekStart)
+            const weekDates = getWeekDates(weekStart)
+            const isOpen    = expandedWeeks.has(key)
+            const wLabel    = getWeekLabel(weekStart, weddingDate)
+            const isWedding = wLabel.includes('💍')
+
+            // Count tasks in this week
+            const weekTaskCount = weekDates.reduce(
+              (sum, d) => sum + (tasksByKey.get(toDateStr(d))?.length ?? 0),
+              0,
+            )
+
+            return (
+              <div
+                key={key}
+                className={`rounded-2xl border shadow-sm overflow-hidden ${
+                  isWedding
+                    ? 'border-violet-400 bg-violet-50/30'
+                    : 'border-slate-200 bg-white'
+                }`}
+              >
+                {/* Accordion header */}
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-3.5 text-right hover:bg-slate-50/60 transition-colors"
+                  onClick={() =>
+                    setExpandedWeeks((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(key)) next.delete(key)
+                      else next.add(key)
+                      return next
+                    })
+                  }
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-bold ${isWedding ? 'text-violet-700' : 'text-slate-800'}`}>
+                      {wLabel}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {weekRangeLabel(weekStart)}
+                    </p>
+                  </div>
+
+                  {weekTaskCount > 0 && (
+                    <span className="text-xs font-semibold text-violet-600 bg-violet-100 rounded-full px-2 py-0.5">
+                      {weekTaskCount} משימות
+                    </span>
+                  )}
+
+                  {isOpen ? (
+                    <ChevronUp size={16} className="text-slate-400 shrink-0" />
+                  ) : (
+                    <ChevronDown size={16} className="text-slate-400 shrink-0" />
+                  )}
+                </button>
+
+                {/* Expanded week grid */}
+                {isOpen && (
+                  <div className="px-4 pb-4 border-t border-slate-100">
+                    <div className="mt-3">
+                      <WeekGrid
+                        weekDates={weekDates}
+                        tasksByKey={tasksByKey}
+                        showBacklog={false}
+                        {...sharedColProps}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Category legend ───────────────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-6 pt-4 border-t border-slate-100">
+        {Object.entries(CATEGORY_DOT).map(([cat, dotCls]) => {
+          const LABELS: Record<string, string> = {
+            halacha_and_prep:      'הלכה והכנות',
+            groom_gifts:           'מתנות לחתן',
+            trousseau_and_home:    'נדוניה ובית',
+            bride_clothing:        'ביגוד וטיפוח',
+            logistics_and_vendors: 'לוגיסטיקה',
+            sheva_brachot:         'שבע ברכות',
+          }
+          return (
+            <div key={cat} className="flex items-center gap-1.5">
+              <div className={`w-2 h-2 rounded-full ${dotCls}`} />
+              <span className="text-xs text-slate-400">{LABELS[cat] ?? cat}</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

@@ -97,7 +97,8 @@ export async function createTask(
 
 export async function updateTask(
   id: string,
-  updates: Partial<Task>,
+  // Allow null for optional fields — null means "$unset" (clear) the field.
+  updates: Partial<Task> & { dueDate?: string | null },
 ): Promise<ActionResult<Task>> {
   try {
     await connectToDatabase()
@@ -106,9 +107,24 @@ export async function updateTask(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id: _guardId, createdAt: _guardCreatedAt, ...mutableFields } = updates
 
+    // Separate explicit nulls (→ $unset) from normal updates (→ $set)
+    const setFields:   Record<string, unknown> = { updatedAt: new Date().toISOString() }
+    const unsetFields: Record<string, 1>       = {}
+
+    for (const [key, value] of Object.entries(mutableFields)) {
+      if (value === null) {
+        unsetFields[key] = 1
+      } else if (value !== undefined) {
+        setFields[key] = value
+      }
+    }
+
+    const updateOp: Record<string, unknown> = { $set: setFields }
+    if (Object.keys(unsetFields).length > 0) updateOp['$unset'] = unsetFields
+
     const doc = await TaskModel.findOneAndUpdate(
       { id },
-      { $set: { ...mutableFields, updatedAt: new Date().toISOString() } },
+      updateOp,
       { new: true, runValidators: true },
     )
 
