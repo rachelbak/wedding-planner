@@ -925,13 +925,17 @@ export default function TaskChecklist({
           task={editingTask}
           categories={categories}
           onSave={handleSaveEdit}
+          onDelete={(id) => {
+            setTasks((prev) => prev.filter((t) => t.id !== id))
+            setEditingTask(null)
+          }}
           onClose={() => setEditingTask(null)}
         />
       )}
 
       {emailOpen && (
         <EmailModal
-          taskIds={filteredTasks.map((t) => t.id)}
+          tasks={filteredTasks}
           defaultEmail={process.env.NEXT_PUBLIC_BRIDE_EMAIL ?? ''}
           onClose={() => setEmailOpen(false)}
         />

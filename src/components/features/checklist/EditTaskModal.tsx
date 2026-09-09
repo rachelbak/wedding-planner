@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Loader2, Save } from 'lucide-react'
-import { updateTask } from '@/app/actions/tasks'
+import { X, Loader2, Save, Trash2 } from 'lucide-react'
+import { updateTask, deleteTask } from '@/app/actions/tasks'
 import type { Task, Category, Priority, AssignedTo } from '@/domain/types'
 
 // ============================================================================
@@ -10,11 +10,11 @@ import type { Task, Category, Priority, AssignedTo } from '@/domain/types'
 // ============================================================================
 
 interface EditForm {
-  title:      string
-  notes:      string
-  priority:   Priority
-  assignedTo: AssignedTo
-  category:   string
+  title:       string
+  notes:       string
+  priority:    Priority
+  assignedTo:  AssignedTo
+  category:    string
   subcategory: string
 }
 
@@ -22,6 +22,7 @@ export interface EditTaskModalProps {
   task:       Task
   categories: Category[]
   onSave:     (updated: Task) => void
+  onDelete?:  (id: string) => void   // optional — callers that support delete pass it
   onClose:    () => void
 }
 
@@ -29,7 +30,7 @@ export interface EditTaskModalProps {
 // COMPONENT
 // ============================================================================
 
-export default function EditTaskModal({ task, categories, onSave, onClose }: EditTaskModalProps) {
+export default function EditTaskModal({ task, categories, onSave, onDelete, onClose }: EditTaskModalProps) {
   const [form, setForm] = useState<EditForm>({
     title:       task.title,
     notes:       task.notes ?? '',
@@ -38,8 +39,10 @@ export default function EditTaskModal({ task, categories, onSave, onClose }: Edi
     category:    task.category,
     subcategory: task.subcategory ?? '',
   })
-  const [isSaving, setIsSaving] = useState(false)
-  const [error,    setError]    = useState<string | null>(null)
+  const [isSaving,        setIsSaving]        = useState(false)
+  const [isDeleting,      setIsDeleting]      = useState(false)
+  const [deleteConfirm,   setDeleteConfirm]   = useState(false)
+  const [error,           setError]           = useState<string | null>(null)
 
   const patch = <K extends keyof EditForm>(key: K, value: EditForm[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -61,7 +64,6 @@ export default function EditTaskModal({ task, categories, onSave, onClose }: Edi
       priority:   form.priority,
       assignedTo: form.assignedTo,
       category:   form.category,
-      // null triggers $unset so a cleared subcategory is properly removed from MongoDB
       subcategory: form.subcategory || null,
     })
 
@@ -73,6 +75,20 @@ export default function EditTaskModal({ task, categories, onSave, onClose }: Edi
     }
 
     onSave(result.data)
+    onClose()
+  }
+
+  async function handleDelete() {
+    setIsDeleting(true)
+    setError(null)
+    const result = await deleteTask(task.id)
+    setIsDeleting(false)
+    if (!result.success) {
+      setError(result.error)
+      setDeleteConfirm(false)
+      return
+    }
+    onDelete?.(task.id)
     onClose()
   }
 
@@ -184,7 +200,7 @@ export default function EditTaskModal({ task, categories, onSave, onClose }: Edi
             )}
           </label>
 
-          {/* Subcategory — only when active category has subcategories */}
+          {/* Subcategory */}
           {(activeCat?.subcategories?.length ?? 0) > 0 && (
             <label className="block">
               <span className="text-xs font-medium text-slate-500 block mb-1.5">תת-קטגוריה</span>
@@ -209,24 +225,64 @@ export default function EditTaskModal({ task, categories, onSave, onClose }: Edi
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-slate-100 flex gap-3 shrink-0">
-          <button
-            onClick={() => void handleSave()}
-            disabled={isSaving || !form.title.trim()}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-60"
-          >
-            {isSaving ? (
-              <><Loader2 size={15} className="animate-spin" />שומר...</>
+        <div className="px-5 py-4 border-t border-slate-100 shrink-0 space-y-2">
+
+          {/* Save / Cancel row */}
+          <div className="flex gap-3">
+            <button
+              onClick={() => void handleSave()}
+              disabled={isSaving || isDeleting || !form.title.trim()}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-60"
+            >
+              {isSaving ? (
+                <><Loader2 size={15} className="animate-spin" />שומר...</>
+              ) : (
+                <><Save size={15} />שמור שינויים</>
+              )}
+            </button>
+            <button
+              onClick={onClose}
+              disabled={isSaving || isDeleting}
+              className="px-5 py-2.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-60"
+            >
+              ביטול
+            </button>
+          </div>
+
+          {/* Delete row — only when caller supports it */}
+          {onDelete && (
+            deleteConfirm ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void handleDelete()}
+                  disabled={isDeleting}
+                  className="flex-1 flex items-center justify-center gap-2 py-2 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-60"
+                >
+                  {isDeleting ? (
+                    <><Loader2 size={14} className="animate-spin" />מוחק...</>
+                  ) : (
+                    <><Trash2 size={14} />אשרי מחיקה</>
+                  )}
+                </button>
+                <button
+                  onClick={() => setDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  className="px-4 py-2 text-sm text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                >
+                  בטלי
+                </button>
+              </div>
             ) : (
-              <><Save size={15} />שמור שינויים</>
-            )}
-          </button>
-          <button
-            onClick={onClose}
-            className="px-5 py-2.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
-          >
-            ביטול
-          </button>
+              <button
+                onClick={() => setDeleteConfirm(true)}
+                disabled={isSaving || isDeleting}
+                className="w-full flex items-center justify-center gap-2 py-2 text-sm text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-40"
+              >
+                <Trash2 size={14} />
+                מחק משימה
+              </button>
+            )
+          )}
         </div>
       </div>
     </div>

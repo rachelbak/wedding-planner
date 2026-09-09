@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   CheckCircle2, Circle, Loader2, MoreHorizontal, X,
-  ChevronLeft, ChevronRight, CalendarDays, Inbox, Mail,
+  ChevronLeft, ChevronRight, CalendarDays, Inbox, Mail, Trash2,
 } from 'lucide-react'
-import { updateTask } from '@/app/actions/tasks'
+import { updateTask, deleteTask } from '@/app/actions/tasks'
 import type { Task, Category, Priority, AssignedTo, TaskStatus } from '@/domain/types'
 import { WEDDING_DATE } from '@/config/wedding'
 import {
@@ -122,11 +122,12 @@ interface PlannerCardProps {
   onMenuMouseDown: (e: React.MouseEvent) => void
   onMenuClick:     () => void
   onEdit:          () => void
+  onDelete:        () => void
 }
 
 function PlannerCard({
   task, dotCls, isDragging, isPending, isMenuOpen, moveOptions,
-  onDragStart, onDragEnd, onToggle, onMove, onMenuMouseDown, onMenuClick, onEdit,
+  onDragStart, onDragEnd, onToggle, onMove, onMenuMouseDown, onMenuClick, onEdit, onDelete,
 }: PlannerCardProps) {
   const isDone  = task.status === 'DONE'
   const pBorder = PRIORITY_BORDER[task.priority]
@@ -138,7 +139,7 @@ function PlannerCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onEdit}
-      className={`relative bg-white rounded-xl border ${pBorder} shadow-sm select-none cursor-pointer transition-all duration-150 ${
+      className={`group relative bg-white rounded-xl border ${pBorder} shadow-sm select-none cursor-pointer transition-all duration-150 ${
         isDragging ? 'opacity-40 scale-95 shadow-none' : 'opacity-100 hover:shadow-md hover:-translate-y-px'
       }`}
     >
@@ -167,6 +168,16 @@ function PlannerCard({
               ? <CheckCircle2 size={14} className="text-violet-500" />
               : <Circle size={14} />
           }
+        </button>
+
+        {/* Delete button — hidden until hover */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          disabled={isPending}
+          aria-label="מחק משימה"
+          className="shrink-0 p-0.5 text-slate-200 hover:text-red-500 transition-colors rounded opacity-0 group-hover:opacity-100 disabled:opacity-0"
+        >
+          <Trash2 size={13} />
         </button>
 
         {/* Quick-move menu */}
@@ -225,13 +236,14 @@ interface BacklogSidebarProps {
   onMenuToggle: (id: string) => void
   onMenuMD:     (e: React.MouseEvent, id: string) => void
   onEdit:       (task: Task) => void
+  onDelete:     (task: Task) => void
 }
 
 function BacklogSidebar({
   tasks, categories, isDropTarget,
   draggedId, pendingIds, openMenuId, moveOptions,
   onDragOver, onDragLeave, onDrop,
-  onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
+  onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit, onDelete,
 }: BacklogSidebarProps) {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden lg:max-h-[calc(100vh-7rem)]">
@@ -285,6 +297,7 @@ function BacklogSidebar({
                 onMenuMouseDown={(e) => onMenuMD(e, task.id)}
                 onMenuClick={() => onMenuToggle(task.id)}
                 onEdit={() => onEdit(task)}
+                onDelete={() => onDelete(task)}
               />
             ))}
           </div>
@@ -370,6 +383,7 @@ interface DayColumnProps {
   onMenuToggle: (id: string) => void
   onMenuMD:     (e: React.MouseEvent, id: string) => void
   onEdit:       (task: Task) => void
+  onDelete:     (task: Task) => void
 }
 
 function DayColumn({
@@ -377,7 +391,7 @@ function DayColumn({
   hebrewDate, holiday, draggedId, pendingIds,
   openMenuId, moveOptions,
   onDragOver, onDragLeave, onDrop,
-  onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
+  onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit, onDelete,
 }: DayColumnProps) {
   const today = isToday(parseLocalDate(dateKey))
 
@@ -419,6 +433,7 @@ function DayColumn({
             onMenuMouseDown={(e) => onMenuMD(e, task.id)}
             onMenuClick={() => onMenuToggle(task.id)}
             onEdit={() => onEdit(task)}
+            onDelete={() => onDelete(task)}
           />
         ))}
       </div>
@@ -451,17 +466,18 @@ interface WeekGridProps {
   onMenuToggle: (id: string) => void
   onMenuMD:     (e: React.MouseEvent, id: string) => void
   onEdit:       (task: Task) => void
+  onDelete:     (task: Task) => void
 }
 
 function WeekGrid({
   weekDates, tasksByKey, categories, hebrewDates, holidays,
   dragOverKey, draggedId, pendingIds, openMenuId, moveOptions,
   onDragOver, onDragLeave, onDrop, onDragStart, onDragEnd,
-  onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
+  onToggle, onMove, onMenuToggle, onMenuMD, onEdit, onDelete,
 }: WeekGridProps) {
   const colProps = {
     categories, draggedId, pendingIds, openMenuId, moveOptions,
-    onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit,
+    onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit, onDelete,
   }
 
   return (
@@ -638,6 +654,19 @@ export default function WeeklyPlanner({
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
   }
 
+  // ── Delete task ───────────────────────────────────────────────────────────
+  async function handleDeleteTask(task: Task) {
+    if (pendingIds.has(task.id)) return
+    setPendingIds((prev) => new Set([...prev, task.id]))
+    setTasks((prev) => prev.filter((t) => t.id !== task.id))
+    const result = await deleteTask(task.id)
+    setPendingIds((prev) => { const n = new Set(prev); n.delete(task.id); return n })
+    if (!result.success) {
+      setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]))
+      showToast(`שגיאה במחיקת המשימה: ${result.error}`)
+    }
+  }
+
   // ── DnD handlers ──────────────────────────────────────────────────────────
   function handleDragStart(e: React.DragEvent<HTMLDivElement>, taskId: string) {
     e.dataTransfer.setData('taskId', taskId)
@@ -696,6 +725,7 @@ export default function WeeklyPlanner({
     onMenuToggle: handleMenuToggle,
     onMenuMD:     handleMenuMouseDown,
     onEdit:       (task: Task) => setEditingTask(task),
+    onDelete:     handleDeleteTask,
   }
 
   // ── Shared props for the BacklogSidebar ───────────────────────────────────
@@ -717,6 +747,7 @@ export default function WeeklyPlanner({
     onMenuToggle: handleMenuToggle,
     onMenuMD:     handleMenuMouseDown,
     onEdit:       (task: Task) => setEditingTask(task),
+    onDelete:     handleDeleteTask,
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -745,13 +776,17 @@ export default function WeeklyPlanner({
           task={editingTask}
           categories={categories}
           onSave={handleSaveEdit}
+          onDelete={(id) => {
+            setTasks((prev) => prev.filter((t) => t.id !== id))
+            setEditingTask(null)
+          }}
           onClose={() => setEditingTask(null)}
         />
       )}
 
       {emailOpen && (
         <EmailModal
-          taskIds={visibleTasks.map((t) => t.id)}
+          tasks={visibleTasks}
           defaultEmail={process.env.NEXT_PUBLIC_BRIDE_EMAIL ?? ''}
           onClose={() => setEmailOpen(false)}
         />
@@ -872,11 +907,11 @@ export default function WeeklyPlanner({
           Mobile:  flex-col-reverse → weeks on top, sidebar below
           Desktop: flex-row with RTL → sidebar on right, weeks on left
       ══════════════════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col-reverse lg:flex-row gap-6 lg:items-start">
+      <div className="flex flex-col-reverse lg:flex-row gap-6">
 
         {/* ── Backlog Sidebar ─────────────────────────────────────────────── */}
         {/* First in DOM = rightmost in RTL flex-row on desktop */}
-        <aside className="w-full lg:w-72 xl:w-80 shrink-0 lg:sticky lg:top-6">
+        <aside className="w-full lg:w-72 xl:w-80 shrink-0 lg:sticky lg:top-6 lg:self-start">
           <BacklogSidebar {...backlogProps} />
         </aside>
 

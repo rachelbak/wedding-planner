@@ -15,7 +15,8 @@ export async function sendManualTasksEmail(
 ): Promise<EmailResult> {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
-    return { success: false, error: 'RESEND_API_KEY is not configured' }
+    console.warn('[sendManualTasksEmail] RESEND_API_KEY is not set — email was not sent.')
+    return { success: false, error: 'שירות המייל אינו מוגדר (RESEND_API_KEY חסר). פנה למנהל המערכת.' }
   }
 
   if (!recipientEmail.includes('@')) {
