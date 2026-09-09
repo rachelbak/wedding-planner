@@ -143,41 +143,46 @@ function PlannerCard({
         isDragging ? 'opacity-40 scale-95 shadow-none' : 'opacity-100 hover:shadow-md hover:-translate-y-px'
       }`}
     >
-      <div className="flex items-start gap-2 p-3">
-        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotCls}`} />
-
-        <div className="flex-1 min-w-0">
-          <p className={`text-xs font-medium leading-snug break-words ${isDone ? 'line-through text-slate-400' : 'text-slate-700'}`}>
-            {task.title}
-          </p>
-          <p className={`text-[10px] mt-0.5 ${pText}`}>
-            {task.priority === 'high' ? '● גבוה' : task.priority === 'medium' ? '● בינוני' : ''}
-          </p>
-        </div>
+      {/* ── Main row ── */}
+      <div className="flex items-start gap-3 p-4">
 
         {/* Checkbox */}
         <button
           onClick={(e) => { e.stopPropagation(); onToggle() }}
           disabled={isPending}
           aria-label={isDone ? 'בטל' : 'סמן כהושלם'}
-          className="shrink-0 text-slate-300 hover:text-violet-500 transition-colors disabled:opacity-40"
+          className="mt-0.5 shrink-0 text-slate-300 hover:text-violet-500 transition-colors disabled:opacity-40"
         >
           {isPending
-            ? <Loader2 size={14} className="animate-spin text-violet-400" />
+            ? <Loader2 size={18} className="animate-spin text-violet-400" />
             : isDone
-              ? <CheckCircle2 size={14} className="text-violet-500" />
-              : <Circle size={14} />
+              ? <CheckCircle2 size={18} className="text-violet-600" />
+              : <Circle size={18} />
           }
         </button>
 
-        {/* Delete button — hidden until hover */}
+        {/* Title + meta */}
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-medium leading-relaxed ${isDone ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+            {task.title}
+          </p>
+          {task.priority !== 'low' && !isDone && (
+            <p className={`text-xs mt-0.5 ${pText}`}>
+              {task.priority === 'high' ? '● גבוה' : '● בינוני'}
+            </p>
+          )}
+          {/* Category dot — subtle indicator */}
+          <div className={`inline-block w-1.5 h-1.5 rounded-full mt-1 ${dotCls}`} />
+        </div>
+
+        {/* Delete — hover-only */}
         <button
           onClick={(e) => { e.stopPropagation(); onDelete() }}
           disabled={isPending}
           aria-label="מחק משימה"
           className="shrink-0 p-0.5 text-slate-200 hover:text-red-500 transition-colors rounded opacity-0 group-hover:opacity-100 disabled:opacity-0"
         >
-          <Trash2 size={13} />
+          <Trash2 size={14} />
         </button>
 
         {/* Quick-move menu */}
@@ -246,9 +251,9 @@ function BacklogSidebar({
   onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit, onDelete,
 }: BacklogSidebarProps) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden lg:max-h-[calc(100vh-7rem)]">
-      {/* Fixed header */}
-      <div className="shrink-0 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
         <Inbox size={14} className="text-slate-400" />
         <span className="text-sm font-bold text-slate-700">טרם שובץ</span>
         {tasks.length > 0 && (
@@ -258,9 +263,9 @@ function BacklogSidebar({
         )}
       </div>
 
-      {/* Scrollable drop zone */}
+      {/* Natural drop zone — no inner scroll, grows with content */}
       <div
-        className={`flex-1 overflow-y-auto p-3 min-h-[100px] transition-colors duration-150 ${
+        className={`p-3 min-h-[80px] transition-colors duration-150 ${
           isDropTarget ? 'bg-violet-50/50' : ''
         }`}
         onDragOver={onDragOver}
@@ -269,7 +274,7 @@ function BacklogSidebar({
       >
         {tasks.length === 0 ? (
           <div
-            className={`flex items-center justify-center min-h-[80px] rounded-xl border-2 border-dashed transition-colors ${
+            className={`flex items-center justify-center min-h-[64px] rounded-xl border-2 border-dashed transition-colors ${
               isDropTarget ? 'border-violet-400 bg-violet-50' : 'border-slate-200'
             }`}
           >
@@ -277,8 +282,8 @@ function BacklogSidebar({
           </div>
         ) : (
           <div
-            className={`space-y-2 rounded-xl p-2 transition-colors ${
-              isDropTarget ? 'ring-2 ring-violet-400 ring-offset-1 bg-violet-50/40' : ''
+            className={`space-y-2 rounded-xl transition-colors ${
+              isDropTarget ? 'ring-2 ring-violet-400 ring-offset-1 bg-violet-50/30 p-1.5' : ''
             }`}
           >
             {tasks.map((task) => (
@@ -397,7 +402,7 @@ function DayColumn({
 
   return (
     <div
-      className={`flex flex-col min-w-[120px] flex-1 rounded-2xl border-2 transition-colors duration-150 p-3 ${
+      className={`flex flex-col min-w-[200px] flex-1 rounded-2xl border-2 transition-colors duration-150 p-3 ${
         isDropTarget
           ? 'border-violet-400 bg-violet-50/60'
           : 'border-transparent bg-slate-50/60'
