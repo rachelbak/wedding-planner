@@ -143,8 +143,7 @@ function PlannerCard({
         isDragging ? 'opacity-40 scale-95 shadow-none' : 'opacity-100 hover:shadow-md hover:-translate-y-px'
       }`}
     >
-      {/* ── Main row ── */}
-      <div className="flex items-start gap-3 p-4">
+      <div className="flex items-start gap-2 p-3">
 
         {/* Checkbox */}
         <button
@@ -154,26 +153,27 @@ function PlannerCard({
           className="mt-0.5 shrink-0 text-slate-300 hover:text-violet-500 transition-colors disabled:opacity-40"
         >
           {isPending
-            ? <Loader2 size={18} className="animate-spin text-violet-400" />
+            ? <Loader2 size={13} className="animate-spin text-violet-400" />
             : isDone
-              ? <CheckCircle2 size={18} className="text-violet-600" />
-              : <Circle size={18} />
+              ? <CheckCircle2 size={13} className="text-violet-600" />
+              : <Circle size={13} />
           }
         </button>
 
-        {/* Title + meta */}
+        {/* Title + priority */}
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium leading-relaxed ${isDone ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+          <p className={`text-xs font-medium leading-snug ${isDone ? 'line-through text-slate-400' : 'text-slate-700'}`}>
             {task.title}
           </p>
           {task.priority !== 'low' && !isDone && (
-            <p className={`text-xs mt-0.5 ${pText}`}>
+            <p className={`text-[10px] mt-0.5 ${pText}`}>
               {task.priority === 'high' ? '● גבוה' : '● בינוני'}
             </p>
           )}
-          {/* Category dot — subtle indicator */}
-          <div className={`inline-block w-1.5 h-1.5 rounded-full mt-1 ${dotCls}`} />
         </div>
+
+        {/* Category dot */}
+        <div className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${dotCls}`} />
 
         {/* Delete — hover-only */}
         <button
@@ -182,7 +182,7 @@ function PlannerCard({
           aria-label="מחק משימה"
           className="shrink-0 p-0.5 text-slate-200 hover:text-red-500 transition-colors rounded opacity-0 group-hover:opacity-100 disabled:opacity-0"
         >
-          <Trash2 size={14} />
+          <Trash2 size={12} />
         </button>
 
         {/* Quick-move menu */}
@@ -193,7 +193,7 @@ function PlannerCard({
             aria-label="העבר ליום אחר"
             className="p-0.5 text-slate-300 hover:text-slate-600 transition-colors rounded"
           >
-            <MoreHorizontal size={14} />
+            <MoreHorizontal size={13} />
           </button>
 
           {isMenuOpen && (
@@ -251,9 +251,9 @@ function BacklogSidebar({
   onDragStart, onDragEnd, onToggle, onMove, onMenuToggle, onMenuMD, onEdit, onDelete,
 }: BacklogSidebarProps) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col max-h-[calc(100vh-10rem)]">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 shrink-0">
         <Inbox size={14} className="text-slate-400" />
         <span className="text-sm font-bold text-slate-700">טרם שובץ</span>
         {tasks.length > 0 && (
@@ -263,9 +263,9 @@ function BacklogSidebar({
         )}
       </div>
 
-      {/* Natural drop zone — no inner scroll, grows with content */}
+      {/* Scrollable drop zone — grows up to panel max-height */}
       <div
-        className={`p-3 min-h-[80px] transition-colors duration-150 ${
+        className={`flex-1 overflow-y-auto p-3 min-h-[80px] transition-colors duration-150 ${
           isDropTarget ? 'bg-violet-50/50' : ''
         }`}
         onDragOver={onDragOver}
@@ -402,7 +402,7 @@ function DayColumn({
 
   return (
     <div
-      className={`flex flex-col min-w-[200px] flex-1 rounded-2xl border-2 transition-colors duration-150 p-3 ${
+      className={`flex flex-col w-full min-w-0 rounded-2xl border-2 transition-colors duration-150 p-3 ${
         isDropTarget
           ? 'border-violet-400 bg-violet-50/60'
           : 'border-transparent bg-slate-50/60'
@@ -486,7 +486,7 @@ function WeekGrid({
   }
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+    <div className="grid grid-cols-6 gap-2">
       {weekDates.map((date, idx) => {
         const key = toDateStr(date)
         return (
@@ -840,12 +840,12 @@ export default function WeeklyPlanner({
 
       {/* ── Filter bar ────────────────────────────────────────────────────── */}
       <div className="space-y-3 mb-6">
-        {/* Category filter */}
+        {/* Category filter — pills wrap; filters by category slug only */}
         {categories.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setCategoryFilter('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
                 categoryFilter === 'all'
                   ? 'bg-violet-600 text-white'
                   : 'bg-white text-slate-500 border border-slate-200 hover:border-violet-300'
@@ -857,7 +857,7 @@ export default function WeeklyPlanner({
               <button
                 key={cat.id}
                 onClick={() => setCategoryFilter(cat.slug)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
                   categoryFilter === cat.slug
                     ? 'bg-violet-600 text-white'
                     : 'bg-white text-slate-500 border border-slate-200 hover:border-violet-300'
