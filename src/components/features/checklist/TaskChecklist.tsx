@@ -15,6 +15,7 @@ import {
   Settings,
   ArrowRight,
   Mail,
+  FileDown,
 } from 'lucide-react'
 import { updateTask, deleteTask, createTask } from '@/app/actions/tasks'
 import {
@@ -950,6 +951,16 @@ export default function TaskChecklist({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <a
+            href="/api/export/excel"
+            download
+            title="ייצוא לאקסל"
+            aria-label="ייצוא לאקסל"
+            className="flex items-center gap-2 px-3 py-2 bg-white text-slate-600 text-sm font-medium rounded-xl hover:bg-emerald-50 hover:text-emerald-700 border border-slate-200 transition-colors"
+          >
+            <FileDown size={15} />
+            <span className="hidden sm:inline">אקסל</span>
+          </a>
           <button
             onClick={() => setEmailOpen(true)}
             title="שלחי רשימה במייל"
